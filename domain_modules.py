@@ -43,6 +43,8 @@ from schemas import (
     InfraMeasurements,
     StructuralConcept,
 )
+from docket_generator import render_docket_export_ui
+
 
 
 def format_crore_lakh(amount: float) -> str:
@@ -772,3 +774,19 @@ def _render_boq_and_kpis(estimate: CostEstimate, export_filename: str, state_key
             use_container_width=True,
             key=f"down_{state_key}",
         )
+
+    # Official Government PWD Tender Docket & Printable PDF
+    category_map = {
+        "b_est": ("Building Construction & Renovation Work", "Building Construction Wing"),
+        "w_est": ("Rural & Urban Water Supply Scheme", "Public Health Engineering Wing"),
+        "inf_est": ("Basic Infrastructure & Area Development Work", "Infrastructure & Urban Works Wing"),
+    }
+    title, category = category_map.get(state_key, ("Infrastructure Civil Works", "General Civil Wing"))
+    render_docket_export_ui(
+        estimate=estimate,
+        project_title=title,
+        work_category=category,
+        location="Maharashtra, India",
+        key_suffix=state_key,
+    )
+

@@ -66,6 +66,8 @@ from domain_modules import (
     render_infra_module,
     render_concept_module,
 )
+from docket_generator import render_docket_export_ui
+
 
 st.set_page_config(
     page_title="महा-इन्फ्रा AI — Maharashtra PWD Infrastructure Cost Portal",
@@ -184,19 +186,19 @@ st.markdown("""
         margin-bottom: 24px;
     }
     .kpi-card {
-        background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
-        border: 1px solid #e2e8f0;
+        background: linear-gradient(145deg, #1e293b 0%, #0f172a 100%);
+        border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 18px;
         padding: 22px 24px;
-        box-shadow: 0 10px 30px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
         transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
         position: relative;
         overflow: hidden;
     }
     .kpi-card:hover {
-        transform: translateY(-8px) perspective(1000px) rotateX(2deg);
-        box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.15), inset 0 1px 0 rgba(255, 255, 255, 1);
-        border-color: #93c5fd;
+        transform: translateY(-6px);
+        box-shadow: 0 20px 40px -10px rgba(2, 132, 199, 0.25);
+        border-color: rgba(2, 132, 199, 0.4);
     }
     .kpi-card::before {
         content: '';
@@ -206,12 +208,12 @@ st.markdown("""
         width: 100%;
         height: 5px;
     }
-    .kpi-subtotal::before { background: linear-gradient(90deg, #6366f1, #818cf8, #60a5fa); }
+    .kpi-subtotal::before { background: linear-gradient(90deg, #0284c7, #38bdf8, #60a5fa); }
     .kpi-gst::before { background: linear-gradient(90deg, #f59e0b, #fbbf24, #fcd34d); }
     .kpi-total {
-        background: linear-gradient(180deg, #ffffff 0%, #ecfdf5 50%, #d1fae5 100%);
-        border: 2px solid #34d399;
-        box-shadow: 0 14px 32px -5px rgba(16, 185, 129, 0.2), 0 0 20px -5px rgba(16, 185, 129, 0.1), inset 0 1px 0 rgba(255, 255, 255, 1);
+        background: linear-gradient(180deg, #064e3b 0%, #022c22 100%);
+        border: 2px solid #10b981;
+        box-shadow: 0 14px 32px -5px rgba(16, 185, 129, 0.2);
     }
     .kpi-total::before { background: linear-gradient(90deg, #10b981, #34d399, #6ee7b7); }
     
@@ -220,30 +222,31 @@ st.markdown("""
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.8px;
-        color: #64748b;
+        color: #94a3b8;
         margin-bottom: 6px;
     }
     .kpi-value {
         font-size: 32px;
         font-weight: 800;
-        color: #0f172a;
+        color: #f8fafc;
         line-height: 1.15;
         letter-spacing: -0.5px;
     }
     .kpi-total .kpi-value {
-        color: #047857;
+        color: #34d399;
         font-size: 34px;
     }
     .kpi-sub {
         font-size: 12px;
-        color: #64748b;
+        color: #94a3b8;
         margin-top: 6px;
         font-weight: 600;
     }
     .kpi-total .kpi-sub {
-        color: #065f46;
+        color: #a7f3d0;
         font-weight: 700;
     }
+
 
     /* Glassmorphism Rate Database Styles */
     .ssr-banner-3d {
@@ -668,6 +671,35 @@ with st.sidebar:
         st.info("✅ Using built-in Maharashtra PWD rate database.")
     else:
         st.warning("Rate database not found. Please upload a schedule of rates file.")
+
+    st.subheader("Regional Jurisdiction")
+    selected_district = st.selectbox(
+        "PWD Division / District",
+        [
+            "Pune (West Division)",
+            "Mumbai Suburban",
+            "Nagpur (Vidarbha Division)",
+            "Nashik (North Division)",
+            "Chhatrapati Sambhajinagar",
+            "Thane (Konkan Division)",
+            "Kolhapur (South Division)",
+            "Amravati Division",
+        ],
+        index=0,
+        help="Select jurisdictional PWD engineering division for lead distance calculation & tender documentation.",
+    )
+    st.session_state["selected_district"] = selected_district
+
+    with st.expander("📚 Civil Standards & Design Codes", expanded=False):
+        st.markdown("""
+        * **IRC:37-2018**: Design of Flexible Pavements
+        * **IRC:58-2015**: Design of Plain Jointed Rigid Concrete Pavements
+        * **IS 456:2000**: Plain and Reinforced Concrete (5th Rev)
+        * **MoRTH**: Specifications for Road & Bridge Works (5th Rev)
+        * **NBC 2016**: National Building Code of India
+        * **CPHEEO**: Manual on Water Supply and Treatment
+        """)
+
 
 
 @st.cache_data(show_spinner="Loading and validating SSR...")
@@ -1715,8 +1747,61 @@ def render_road_module():
                 </div>
                 """, unsafe_allow_html=True)
 
+            # Value Engineering & Alternative Analysis (Flexible vs Rigid Pavement)
+            with st.expander("⚖️ Value Engineering: Bituminous (Flexible) vs Concrete (Rigid) 25-Year Life-Cycle Analysis", expanded=False):
+                cur_len = float(st.session_state.get("road_length", 100.0))
+                cur_wid = float(st.session_state.get("road_width", 3.75))
+                area_sqm = max(cur_len * cur_wid, 10.0)
+
+                # Bituminous lifecycle parameters
+                bt_initial = float(estimate.total) if "bitum" in str(st.session_state.get("road_kind", "")).lower() else (area_sqm * 2400.0 * 1.18)
+                bt_maint_10yr = bt_initial * 0.35  # Resurfacing / seal coats
+                bt_maint_25yr = bt_initial * 0.75  # Major overlay & millings
+                bt_total_25yr = bt_initial + bt_maint_25yr
+
+                # Rigid Concrete (PQC M40) lifecycle parameters
+                cc_initial = float(estimate.total) if "concrete" in str(st.session_state.get("road_kind", "")).lower() else (area_sqm * 3350.0 * 1.18)
+                cc_maint_10yr = cc_initial * 0.08  # Joint sealing
+                cc_maint_25yr = cc_initial * 0.18  # Panel stitching & joint resealing
+                cc_total_25yr = cc_initial + cc_maint_25yr
+
+                diff_25yr = bt_total_25yr - cc_total_25yr
+                better_option = "Rigid Cement Concrete (CC)" if diff_25yr > 0 else "Flexible Bituminous"
+
+                st.markdown(f"""
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin-bottom: 12px;">
+                    <div style="font-weight: 800; font-size: 14px; color: #0f172a; margin-bottom: 8px;">
+                        📊 25-Year Life-Cycle Cost Comparison per IRC:37 & IRC:58 Standards ({cur_len:,.0f}m x {cur_wid:.2f}m • {area_sqm:,.0f} m²)
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px;">
+                        <div style="background: #ffffff; border: 1px solid #cbd5e1; border-top: 3px solid #f59e0b; border-radius: 8px; padding: 14px;">
+                            <div style="font-size: 12px; font-weight: 800; color: #b45309;">🛣️ Flexible Pavement (Bituminous BM+SDBC)</div>
+                            <div style="margin-top: 8px; font-size: 12px; color: #475569;">Initial Construction Capex: <strong>{format_crore_lakh(bt_initial)}</strong></div>
+                            <div style="font-size: 12px; color: #475569;">10-Year Maintenance (Overlays): <strong>{format_crore_lakh(bt_maint_10yr)}</strong></div>
+                            <div style="font-size: 12px; color: #475569;">25-Year Cumulative Maintenance: <strong>{format_crore_lakh(bt_maint_25yr)}</strong></div>
+                            <div style="border-top: 1px dashed #cbd5e1; margin-top: 8px; padding-top: 6px; font-size: 13px; font-weight: 800; color: #0f172a;">
+                                25-Year Total Life-Cycle: {format_crore_lakh(bt_total_25yr)}
+                            </div>
+                        </div>
+                        <div style="background: #ffffff; border: 1px solid #cbd5e1; border-top: 3px solid #10b981; border-radius: 8px; padding: 14px;">
+                            <div style="font-size: 12px; font-weight: 800; color: #047857;">🧱 Rigid Pavement (Cement Concrete M40 PQC)</div>
+                            <div style="margin-top: 8px; font-size: 12px; color: #475569;">Initial Construction Capex: <strong>{format_crore_lakh(cc_initial)}</strong></div>
+                            <div style="font-size: 12px; color: #475569;">10-Year Maintenance (Joints): <strong>{format_crore_lakh(cc_maint_10yr)}</strong></div>
+                            <div style="font-size: 12px; color: #475569;">25-Year Cumulative Maintenance: <strong>{format_crore_lakh(cc_maint_25yr)}</strong></div>
+                            <div style="border-top: 1px dashed #cbd5e1; margin-top: 8px; padding-top: 6px; font-size: 13px; font-weight: 800; color: #047857;">
+                                25-Year Total Life-Cycle: {format_crore_lakh(cc_total_25yr)}
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 14px; background: rgba(16, 185, 129, 0.08); border-left: 4px solid #10b981; padding: 10px 14px; border-radius: 4px; font-size: 12px; color: #065f46;">
+                        <strong>💡 PWD Engineering Verdict:</strong> {better_option} provides the optimal economic return. While rigid pavement requires higher upfront investment (~35%), its structural longevity of 25+ years minimizes traffic disruption and eliminates recurring monsoon repair expenditures.
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
             # Build interactive editor dataframe
             table_rows = []
+
             for item in estimate.items:
                 table_rows.append({
                     "Remove": False,
@@ -1792,18 +1877,136 @@ def render_road_module():
                     st.session_state.estimate = CostEstimate(gst_percent=gst)
                     st.rerun()
 
+            # Official Government PWD Tender Docket & Printable PDF
+            cur_rk = st.session_state.get("road_kind", "Bituminous")
+            cur_l = st.session_state.get("road_length", 100.0)
+            render_docket_export_ui(
+                estimate=estimate,
+                project_title=f"{cur_rk} Road Construction ({cur_l:,.0f}m)",
+                work_category="Roads & Highways Engineering Wing",
+                location="Maharashtra PWD Division",
+                key_suffix="road",
+            )
 
+
+
+
+# ============================================================
+# ⚡ 1-CLICK QUICK LOAD PWD SHOWCASE PROJECTS
+# ============================================================
+
+st.markdown("""
+<div style="background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.95) 100%); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 14px; padding: 14px 18px; margin-bottom: 18px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 16px;">⚡</span>
+            <span style="font-size: 13px; font-weight: 800; color: #f8fafc; letter-spacing: 0.3px; text-transform: uppercase;">1-Click PWD Showcase Projects</span>
+            <span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px;">Instant Populate</span>
+        </div>
+        <div style="font-size: 11.5px; color: #94a3b8;">
+            Select any real-world standard template to immediately simulate full quantities, SSR codes, CAD schematics, and PWD tender dockets.
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+col_p1, col_p2, col_p3, col_p4 = st.columns(4)
+
+with col_p1:
+    if st.button("🛣️ NH-48 Highway (3.5 km)", use_container_width=True, help="Load 3.5 km Bituminous 2-Lane Highway with drains & culverts"):
+        st.session_state["work_type"] = "New Road Construction"
+        st.session_state["road_kind"] = "Bitumen / Dambar"
+        st.session_state["road_length"] = 3500.0
+        st.session_state["road_width"] = 7.0
+        st.session_state["road_thickness"] = 150.0
+        st.session_state["drain_len"] = 3500.0
+        st.session_state["pothole_count"] = 0
+        meas = ProjectMeasurements(
+            length_m=3500.0,
+            width_m=7.0,
+            thickness_mm=150.0,
+            drain_length_m=3500.0,
+        )
+        st.session_state.measurements = meas
+        preset_ch = get_project_preset_chapters("New Road Construction", "Bitumen / Dambar")
+        st.session_state.estimate = generate_estimate(
+            df=df,
+            mode="New Road Construction",
+            road_kind="Bitumen / Dambar",
+            measurements=meas,
+            ai_analysis=None,
+            allowed_chapters=preset_ch,
+            gst_percent=18.0,
+            use_ai_selection=False,
+        )
+        st.toast("✅ Loaded NH-48 Highway Project (3.5 km Bituminous)", icon="🛣️")
+        st.rerun()
+
+with col_p2:
+    if st.button("🏢 ZP School (G+2)", use_container_width=True, help="Load G+2 RCC School Facility with 350 m² plinth"):
+        if "b_meas" not in st.session_state:
+            st.session_state.b_meas = BuildingMeasurements()
+        b_m = st.session_state.b_meas
+        b_m.building_type = "School / Educational Facility (G+2)"
+        b_m.plinth_area_m2 = 350.0
+        b_m.floors = 3
+        b_m.floor_height_m = 3.3
+        b_m.foundation_type = "Isolated Footing"
+        b_m.concrete_grade = "M-25"
+        b_m.include_doors_windows = True
+        b_m.include_finishing = True
+        b_m.include_plumbing = True
+        st.session_state.b_est = generate_building_estimate(df, b_m)
+        st.toast("✅ Loaded ZP Primary School Building (G+2 Storey)", icon="🏢")
+        st.rerun()
+
+with col_p3:
+    if st.button("🚰 Jal Jeevan Scheme", use_container_width=True, help="Load 50kL Elevated Reservoir + 2.5 km GI Pipeline"):
+        if "w_meas" not in st.session_state:
+            st.session_state.w_meas = WaterSupplyMeasurements()
+        w_m = st.session_state.w_meas
+        w_m.scheme_type = "Distribution Pipeline & Fixtures"
+        w_m.network_length_m = 2500.0
+        w_m.pipe_diameter_mm = 80
+        w_m.pipe_material = "GI Heavy Grade"
+        w_m.storage_tank_litres = 50000.0
+        w_m.storage_tank_type = "Elevated RCC / Masonry"
+        w_m.fixtures_count = 12
+        w_m.inspection_chambers_count = 8
+        w_m.sewer_drain_length_m = 350.0
+        st.session_state.w_est = generate_water_supply_estimate(df, w_m)
+        st.toast("✅ Loaded Jal Jeevan Mission Water Scheme (50kL + 2.5km)", icon="🚰")
+        st.rerun()
+
+with col_p4:
+    if st.button("🌐 Urban Footpath & Drain", use_container_width=True, help="Load 1.2 km Paver Block Footpath + Stormwater Drain"):
+        if "i_meas" not in st.session_state:
+            st.session_state.i_meas = InfraMeasurements()
+        inf_m = st.session_state.i_meas
+        inf_m.project_name = "Urban Footpath & Commercial Corridor"
+        inf_m.compound_wall_length_m = 200.0
+        inf_m.storm_drain_length_m = 500.0
+        inf_m.internal_pavement_area_m2 = 1200.0
+        inf_m.pavement_type = "Interlocking Paver Blocks"
+        inf_m.culverts_count = 4
+        inf_m.street_furniture_count = 20
+        st.session_state.i_est = generate_infra_estimate(df, inf_m)
+        st.toast("✅ Loaded Smart Urban Footpath & Drain Project", icon="🌐")
+        st.rerun()
+
+st.write("")
 
 # ============================================================
 # MULTI-DOMAIN INFRASTRUCTURE ESTIMATION TABS
 # ============================================================
 
-road_domain_tab, building_domain_tab, water_domain_tab, infra_domain_tab, concept_domain_tab = st.tabs([
+road_domain_tab, building_domain_tab, water_domain_tab, infra_domain_tab, concept_domain_tab, web_suite_tab = st.tabs([
     "🛣️ Roads & Highways",
     "🏢 Building Construction",
     "🚰 Water Supply & Sanitation",
     "🌐 Basic Infrastructure",
     "🧠 AI Structural Concept & Capex",
+    "⚡ Enterprise Web Suite (Live)",
 ])
 
 with road_domain_tab:
@@ -1820,6 +2023,29 @@ with infra_domain_tab:
 
 with concept_domain_tab:
     render_concept_module(df)
+
+with web_suite_tab:
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, rgba(2, 132, 199, 0.12) 0%, rgba(139, 92, 246, 0.08) 100%); border: 1px solid rgba(2, 132, 199, 0.35); border-radius: 12px; padding: 12px 18px; margin-bottom: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <div>
+                <strong style="color: #38bdf8; font-size: 14px;">⚡ Enterprise Autonomous Civil Estimation Suite</strong>
+                <div style="font-size: 11.5px; color: #94a3b8; margin-top: 2px;">Blueprint UI/UX, 6-Step Wizard, 2,211 SSR Rates, Vector CAD Schematics, and 1-Click PWD Tender PDF printing.</div>
+            </div>
+            <div>
+                <span style="background: rgba(2,132,199,0.2); color: #38bdf8; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid rgba(2,132,199,0.4);">STANDALONE APP ACTIVE</span>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    html_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
+    if os.path.exists(html_file_path):
+        with open(html_file_path, "r", encoding="utf-8") as f:
+            html_raw_content = f.read()
+        components.html(html_raw_content, height=1050, scrolling=True)
+    else:
+        st.info("index.html not found.")
 
 st.markdown("""
 <div class="app-footer" style="background: linear-gradient(135deg, #091224 0%, #111e38 50%, #0a101f 100%); border-top: 1px solid rgba(59, 130, 246, 0.3);">

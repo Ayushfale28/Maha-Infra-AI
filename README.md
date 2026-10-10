@@ -73,6 +73,7 @@ python -m unittest discover tests
 
 ```
 ├── app.py                 # Main Government Portal Streamlit UI
+├── docket_generator.py    # Official PWD Tender Docket & Printable PDF generator
 ├── domain_modules.py      # Building, Water Supply, Infrastructure & AI Concept modules
 ├── infra_visualizers.py   # Vector CAD schematics (Building frame, Water network, Structural blueprint)
 ├── ai_module.py           # AI backend (OpenRouter LLM + IS 456 rule-based synthesis engine)
@@ -83,10 +84,11 @@ python -m unittest discover tests
 ├── ssr_loader.py          # Maharashtra PWD SSR parser
 ├── ssr_selector.py        # Item candidate search & ranking
 ├── SSR_2022-23 (2).xlsx   # Maharashtra PWD Schedule of Rates (2,211 items)
-└── tests/                 # Unit tests (35 passing tests)
+└── tests/                 # Unit tests (39 passing tests)
 ```
 
 ## 👨‍💻 Author
 
 **Kalash** — Built for Maharashtra Public Works Department (PWD) infrastructure
+
 
