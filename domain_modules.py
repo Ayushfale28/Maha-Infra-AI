@@ -60,60 +60,29 @@ def format_crore_lakh(amount: float) -> str:
 
 
 # ============================================================
-# FRONT-END AI API KEY BADGE & SETTINGS
+# FRONT-END AI ENGINE STATUS (NO KEY EXPOSED)
 # ============================================================
 
-def render_front_end_api_badge(key_prefix: str = "api"):
-    """Render prominent front-end API Key status and quick configuration modal."""
-    current_k = get_api_key()
+def render_ai_engine_status():
+    """Render a safe AI engine status badge. Never reveals the API key."""
     is_active = ai_is_configured()
 
-    col_status, col_btn = st.columns([3, 1])
-    with col_status:
-        if is_active:
-            masked = f"{current_k[:7]}...{current_k[-4:]}" if len(current_k) > 11 else "Connected"
-            st.markdown(f"""
-            <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 6px 12px; display: inline-flex; align-items: center; gap: 8px; margin-bottom: 10px;">
-                <span style="height: 8px; width: 8px; background: #10b981; border-radius: 50%; display: inline-block;"></span>
-                <span style="font-size: 12px; font-weight: 700; color: #047857;">AI Vision Engine Online ({masked})</span>
-                <span style="font-size: 11px; color: #64748b;">• Multimodal defect & civil inspection ready</span>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown("""
-            <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 6px 12px; display: inline-flex; align-items: center; gap: 8px; margin-bottom: 10px;">
-                <span style="height: 8px; width: 8px; background: #f59e0b; border-radius: 50%; display: inline-block;"></span>
-                <span style="font-size: 12px; font-weight: 700; color: #b45309;">Free Computer Vision Mode Active</span>
-                <span style="font-size: 11px; color: #64748b;">• No API key required (Heuristic inspection enabled)</span>
-            </div>
-            """, unsafe_allow_html=True)
-
-    with st.expander("🔑 AI Key Settings (Connect OpenRouter for Cloud Vision)", expanded=False):
-        st.caption("Paste your OpenRouter API key below. You can get a free key at [openrouter.ai](https://openrouter.ai). It will be saved securely for your session.")
-        new_k = st.text_input(
-            "OpenRouter API Key",
-            value=current_k,
-            type="password",
-            placeholder="sk-or-v1-...",
-            key=f"{key_prefix}_input_key",
-            help="Your API key remains local to your browser session."
-        )
-        if st.button("Save & Connect API Key", key=f"{key_prefix}_save_btn", use_container_width=True):
-            if new_k and new_k.strip():
-                clean = new_k.strip()
-                st.session_state["api_key"] = clean
-                st.session_state["OPENROUTER_API_KEY"] = clean
-                os.environ["OPENROUTER_API_KEY"] = clean
-                try:
-                    p = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
-                    p.parent.mkdir(parents=True, exist_ok=True)
-                    p.write_text(f'OPENROUTER_API_KEY = "{clean}"\n', encoding="utf-8")
-                except Exception:
-                    pass
-                st.success("API Key saved and connected successfully!")
-                st.rerun()
-            else:
-                st.warning("Please enter a valid key.")
+    if is_active:
+        st.markdown("""
+        <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 6px 12px; display: inline-flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+            <span style="height: 8px; width: 8px; background: #10b981; border-radius: 50%; display: inline-block;"></span>
+            <span style="font-size: 12px; font-weight: 700; color: #047857;">🟢 AI Vision Engine Active</span>
+            <span style="font-size: 11px; color: #64748b;">• Cloud vision & multimodal defect inspection ready</span>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 6px 12px; display: inline-flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+            <span style="height: 8px; width: 8px; background: #f59e0b; border-radius: 50%; display: inline-block;"></span>
+            <span style="font-size: 12px; font-weight: 700; color: #b45309;">Offline Computer Vision Mode</span>
+            <span style="font-size: 11px; color: #64748b;">• Free heuristic inspection (no API key required)</span>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 # ============================================================
@@ -136,7 +105,7 @@ def render_domain_photo_inspector(
         st.session_state[photos_state_key] = []
 
     with st.expander(f"📸 Step 1: AI Site Photo Inspection & Renovation Analyzer ({domain_label})", expanded=True):
-        render_front_end_api_badge(key_prefix=f"{domain_key}_badge")
+        render_ai_engine_status()
         st.caption(photo_help)
 
         uploaded = st.file_uploader(
@@ -598,7 +567,7 @@ def render_concept_module(df: pd.DataFrame):
     </div>
     """, unsafe_allow_html=True)
 
-    render_front_end_api_badge(key_prefix="concept_badge")
+    render_ai_engine_status()
 
     col1, col2 = st.columns(2)
     with col1:

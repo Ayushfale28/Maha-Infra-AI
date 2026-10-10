@@ -655,33 +655,8 @@ with st.sidebar:
             </div>
         """, unsafe_allow_html=True)
 
-    with st.expander("⚙️ AI Configuration & Key", expanded=not ai_is_configured()):
-        current_k = get_api_key()
-        masked = f"{current_k[:8]}...{current_k[-4:]}" if len(current_k) > 12 else ("Configured" if current_k else "Not configured")
-        st.caption(f"Status: **{masked}**")
-        new_key_input = st.text_input(
-            "OpenRouter API Key",
-            value=current_k,
-            type="password",
-            placeholder="sk-or-v1-...",
-            help="Enter your OpenRouter API key. It will be stored securely for this session.",
-        )
-        if st.button("Save & Apply API Key", use_container_width=True):
-            if new_key_input and new_key_input.strip():
-                clean_k = new_key_input.strip()
-                st.session_state["api_key"] = clean_k
-                os.environ["OPENROUTER_API_KEY"] = clean_k
-                # Persist to .streamlit/secrets.toml
-                try:
-                    secrets_path = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
-                    secrets_path.parent.mkdir(parents=True, exist_ok=True)
-                    secrets_path.write_text(f'OPENROUTER_API_KEY = "{clean_k}"\n', encoding="utf-8")
-                except Exception:
-                    pass
-                st.success("API Key saved and connected!")
-                st.rerun()
-            else:
-                st.warning("Please enter a valid key.")
+
+    st.caption("ℹ️ AI key is configured via Streamlit Secrets or server environment. Contact admin to update.")
 
     st.subheader("Rate Schedule Source")
     st.caption("Upload a schedule of rates file (.xlsx, .xls, or .csv) or use the built-in database.")
