@@ -1,20 +1,27 @@
 """
 Domain Estimation Modules for Maha-Infra AI:
-    1. Building Construction Estimator
-    2. Water Supply & Sanitation Estimator
-    3. Site & Basic Infrastructure Estimator
-    4. AI Structural Concept & Capex Ideator ("Raw Idea of Structure")
+    1. Building Construction & Renovation Estimator
+    2. Water Supply, Drainage & Storage Estimator
+    3. Site & Basic Infrastructure Facility Estimator
+    4. AI Structural Concept & Capex Synthesizer ("Raw Idea of Structure")
 
-Provides interactive forms, live metrics, CAD-style vector graphics,
-itemized Bill of Quantities (BOQ), and statutory PWD cost calculations.
+Provides interactive forms, AI photo inspection, live metrics, CAD-style vector graphics,
+itemized Bill of Quantities (BOQ), and statutory Maharashtra PWD cost calculations.
 """
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from ai_module import generate_structural_concept
+from ai_module import (
+    generate_structural_concept,
+    analyze_domain_photos,
+    ai_is_configured,
+    get_api_key,
+)
 from estimate_service import (
     generate_building_estimate,
     generate_water_supply_estimate,
@@ -53,11 +60,186 @@ def format_crore_lakh(amount: float) -> str:
 
 
 # ============================================================
+# FRONT-END AI API KEY BADGE & SETTINGS
+# ============================================================
+
+def render_front_end_api_badge(key_prefix: str = "api"):
+    """Render prominent front-end API Key status and quick configuration modal."""
+    current_k = get_api_key()
+    is_active = ai_is_configured()
+
+    col_status, col_btn = st.columns([3, 1])
+    with col_status:
+        if is_active:
+            masked = f"{current_k[:7]}...{current_k[-4:]}" if len(current_k) > 11 else "Connected"
+            st.markdown(f"""
+            <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 6px 12px; display: inline-flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                <span style="height: 8px; width: 8px; background: #10b981; border-radius: 50%; display: inline-block;"></span>
+                <span style="font-size: 12px; font-weight: 700; color: #047857;">AI Vision Engine Online ({masked})</span>
+                <span style="font-size: 11px; color: #64748b;">• Multimodal defect & civil inspection ready</span>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 6px 12px; display: inline-flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                <span style="height: 8px; width: 8px; background: #f59e0b; border-radius: 50%; display: inline-block;"></span>
+                <span style="font-size: 12px; font-weight: 700; color: #b45309;">Free Computer Vision Mode Active</span>
+                <span style="font-size: 11px; color: #64748b;">• No API key required (Heuristic inspection enabled)</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+    with st.expander("🔑 AI Key Settings (Connect OpenRouter for Cloud Vision)", expanded=False):
+        st.caption("Paste your OpenRouter API key below. You can get a free key at [openrouter.ai](https://openrouter.ai). It will be saved securely for your session.")
+        new_k = st.text_input(
+            "OpenRouter API Key",
+            value=current_k,
+            type="password",
+            placeholder="sk-or-v1-...",
+            key=f"{key_prefix}_input_key",
+            help="Your API key remains local to your browser session."
+        )
+        if st.button("Save & Connect API Key", key=f"{key_prefix}_save_btn", use_container_width=True):
+            if new_k and new_k.strip():
+                clean = new_k.strip()
+                st.session_state["api_key"] = clean
+                st.session_state["OPENROUTER_API_KEY"] = clean
+                os.environ["OPENROUTER_API_KEY"] = clean
+                try:
+                    p = Path(__file__).resolve().parent / ".streamlit" / "secrets.toml"
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    p.write_text(f'OPENROUTER_API_KEY = "{clean}"\n', encoding="utf-8")
+                except Exception:
+                    pass
+                st.success("API Key saved and connected successfully!")
+                st.rerun()
+            else:
+                st.warning("Please enter a valid key.")
+
+
+# ============================================================
+# REUSABLE DOMAIN PHOTO INSPECTOR & DEFECT ANALYZER
+# ============================================================
+
+def render_domain_photo_inspector(
+    domain_key: str,
+    domain_label: str,
+    on_apply_callback,
+    photo_help: str = "Upload existing structure / site photographs (JPG, PNG) for automated defect detection."
+):
+    """Render automated photo defect analyzer for any civil engineering domain."""
+    results_state_key = f"{domain_key}_ai_results"
+    photos_state_key = f"{domain_key}_photos"
+
+    if results_state_key not in st.session_state:
+        st.session_state[results_state_key] = []
+    if photos_state_key not in st.session_state:
+        st.session_state[photos_state_key] = []
+
+    with st.expander(f"📸 Step 1: AI Site Photo Inspection & Renovation Analyzer ({domain_label})", expanded=True):
+        render_front_end_api_badge(key_prefix=f"{domain_key}_badge")
+        st.caption(photo_help)
+
+        uploaded = st.file_uploader(
+            f"Upload {domain_label} Photos",
+            type=["jpg", "jpeg", "png", "webp"],
+            accept_multiple_files=True,
+            key=f"{domain_key}_file_uploader",
+        )
+
+        note = st.text_input(
+            "Site Location / Engineer's Field Notes (Optional)",
+            placeholder="e.g., Old G+1 school building with wall dampness and cracked plaster in Ward 4",
+            key=f"{domain_key}_note_input"
+        )
+
+        if uploaded:
+            st.session_state[photos_state_key] = [
+                {"name": f.name, "bytes": f.getvalue(), "mime": f.type or "image/jpeg"}
+                for f in uploaded
+            ]
+
+        col_ai, col_cv = st.columns(2)
+        run_ai = col_ai.button(
+            "🤖 Run AI Vision Inspection",
+            type="primary",
+            use_container_width=True,
+            key=f"{domain_key}_btn_ai"
+        )
+        run_cv = col_cv.button(
+            "👁️ Run Offline Computer Vision (Free)",
+            use_container_width=True,
+            key=f"{domain_key}_btn_cv"
+        )
+
+        if run_ai or run_cv:
+            if not st.session_state[photos_state_key]:
+                st.warning("Please upload at least one photograph to analyze.")
+            else:
+                photos = st.session_state[photos_state_key]
+                with st.spinner(f"Analyzing {len(photos)} site photo(s) using civil engineering defect models..."):
+                    # Temporarily suppress AI API if offline button clicked
+                    old_key = os.environ.get("OPENROUTER_API_KEY", "")
+                    if run_cv:
+                        os.environ["OPENROUTER_API_KEY"] = ""
+
+                    results = analyze_domain_photos(domain_key, photos, note)
+
+                    if run_cv:
+                        os.environ["OPENROUTER_API_KEY"] = old_key
+
+                    st.session_state[results_state_key] = results
+                    st.toast("Site inspection completed! Identified civil defects and renovation scope.", icon="✅")
+                    st.rerun()
+
+        # Display results if available
+        ai_res = st.session_state[results_state_key]
+        if ai_res:
+            st.markdown("#### 🔍 Structural & Defect Observations")
+            for idx, item in enumerate(ai_res):
+                p_name = item.get("name", f"Photo {idx+1}")
+                res = item.get("result", {})
+                rec_mode = res.get("recommended_mode", {})
+                mode_val = rec_mode.get("value", "repair") if isinstance(rec_mode, dict) else str(rec_mode)
+                mode_reason = rec_mode.get("reason", "") if isinstance(rec_mode, dict) else ""
+
+                with st.expander(f"📷 Observation {idx+1}: {p_name} — Mode: {mode_val.upper()}", expanded=True):
+                    col_m1, col_m2 = st.columns([1, 2])
+                    with col_m1:
+                        st.info(f"**Recommended Scope:** {mode_val.title()}\n\n**Condition:** {res.get('surface_condition', 'Inspected')}")
+                        if mode_reason:
+                            st.caption(f"Reason: {mode_reason}")
+                    with col_m2:
+                        defects = res.get("defects") or []
+                        if defects:
+                            st.markdown("**Defects Spotted:**")
+                            st.dataframe(pd.DataFrame(defects), hide_index=True, use_container_width=True)
+
+                        works = res.get("suggested_works") or []
+                        if works:
+                            st.markdown("**Recommended Maharashtra PWD Works:**")
+                            for w in works:
+                                w_title = w.get("work", "") if isinstance(w, dict) else str(w)
+                                w_ch = f" (Ch: {', '.join(w.get('suggested_chapters', []))})" if isinstance(w, dict) and w.get("suggested_chapters") else ""
+                                st.write(f"- **{w_title}**{w_ch}")
+
+            # 1-Click Auto Apply Button
+            if st.button(
+                f"✨ Auto-Apply AI Findings to {domain_label} Parameters & BOQ",
+                type="primary",
+                use_container_width=True,
+                key=f"{domain_key}_auto_apply_btn"
+            ):
+                on_apply_callback(ai_res)
+                st.toast("AI recommendations auto-applied to project estimate!", icon="🚀")
+                st.rerun()
+
+
+# ============================================================
 # 1. BUILDING ESTIMATION MODULE
 # ============================================================
 
 def render_building_module(df: pd.DataFrame):
-    """Render full building estimation workflow."""
+    """Render full building estimation workflow with AI photo inspection."""
     if "b_meas" not in st.session_state:
         st.session_state.b_meas = BuildingMeasurements()
     if "b_est" not in st.session_state:
@@ -70,14 +252,35 @@ def render_building_module(df: pd.DataFrame):
         <span style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(59, 130, 246, 0.4);">
             🏢 MAHARASHTRA PWD BUILDING WING
         </span>
-        <h2 style="color: #ffffff; margin: 8px 0 4px 0; font-size: 22px; font-weight: 800;">Building Construction Cost Estimator</h2>
+        <h2 style="color: #ffffff; margin: 8px 0 4px 0; font-size: 22px; font-weight: 800;">Building Construction & Renovation Estimator</h2>
         <p style="color: #94a3b8; margin: 0; font-size: 13px;">Itemized PWD SSR 2022-23 rates for Foundations, RCC Framing, Masonry, Finishing, and Services.</p>
     </div>
     """, unsafe_allow_html=True)
 
+    # Callback for AI Auto Apply
+    def apply_building_ai(results):
+        has_renovation = any(
+            r.get("result", {}).get("recommended_mode", {}).get("value") == "renovation"
+            for r in results
+        )
+        if has_renovation:
+            b.include_finishing = True
+            b.include_doors_windows = True
+            b.include_plumbing = True
+            b.building_type = "Renovation / Rehabilitation of Existing Structure"
+        st.session_state.b_est = generate_building_estimate(df, b)
+
+    # Step 1: Photo Inspector
+    render_domain_photo_inspector(
+        domain_key="building",
+        domain_label="Building Structure & Renovation",
+        on_apply_callback=apply_building_ai,
+        photo_help="Upload photographs of old or existing building (damaged plaster, damp walls, cracked beams) for automatic renovation scope."
+    )
+
+    st.markdown("#### 📐 Step 2: Dimensional Parameters & Structural Specifications")
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("##### 📐 Dimensional Parameters")
         b_type = st.selectbox(
             "Building Classification",
             [
@@ -86,8 +289,9 @@ def render_building_module(df: pd.DataFrame):
                 "School / Educational Facility (G+2)",
                 "Hospital / Primary Health Center (G+1)",
                 "Community Hall / Samaj Mandir",
+                "Renovation / Rehabilitation of Existing Structure",
             ],
-            index=0,
+            index=0 if b.building_type not in ["Renovation / Rehabilitation of Existing Structure"] else 5,
             key="b_type_input",
         )
         plinth_sqm = st.number_input(
@@ -117,7 +321,6 @@ def render_building_module(df: pd.DataFrame):
         )
 
     with col2:
-        st.markdown("##### 🏗️ Structural & Scope Options")
         fnd_type = st.selectbox(
             "Foundation System",
             ["Isolated Footing", "Raft Foundation", "Pile Foundation"],
@@ -158,7 +361,7 @@ def render_building_module(df: pd.DataFrame):
         st.markdown(svg_code, unsafe_allow_html=True)
 
     # Generate Estimate Button
-    if st.button("🏗️ Generate Building Estimate & Bill of Quantities", type="primary", use_container_width=True, key="btn_gen_building"):
+    if st.button("🏗️ Calculate Building Cost & Generate Official BOQ", type="primary", use_container_width=True, key="btn_gen_building"):
         with st.spinner("Accessing Maharashtra PWD Schedule of Rates (SSR 2022-23)..."):
             st.session_state.b_est = generate_building_estimate(df, b)
             st.rerun()
@@ -175,7 +378,7 @@ def render_building_module(df: pd.DataFrame):
 # ============================================================
 
 def render_water_module(df: pd.DataFrame):
-    """Render water supply and sanitation estimation workflow."""
+    """Render water supply and sanitation estimation workflow with AI photo inspection."""
     if "w_meas" not in st.session_state:
         st.session_state.w_meas = WaterSupplyMeasurements()
     if "w_est" not in st.session_state:
@@ -189,19 +392,36 @@ def render_water_module(df: pd.DataFrame):
             🚰 PUBLIC HEALTH ENGINEERING (PHE) WING
         </span>
         <h2 style="color: #ffffff; margin: 8px 0 4px 0; font-size: 22px; font-weight: 800;">Water Supply, Storage & Sanitation Estimator</h2>
-        <p style="color: #94a3b8; margin: 0; font-size: 13px;">Itemized PWD SSR rates for Distribution Pipelines, Reservoirs, Inspection Chambers, and Fittings.</p>
+        <p style="color: #94a3b8; margin: 0; font-size: 13px;">Itemized PWD SSR rates for Distribution Pipelines, Reservoirs, Inspection Chambers, and Valves.</p>
     </div>
     """, unsafe_allow_html=True)
 
+    # Callback for AI Auto Apply
+    def apply_water_ai(results):
+        w.network_length_m = max(w.network_length_m, 350.0)
+        w.storage_tank_litres = max(w.storage_tank_litres, 5000.0)
+        w.inspection_chambers_count = max(w.inspection_chambers_count, 4)
+        w.fixtures_count = max(w.fixtures_count, 8)
+        w.sewer_drain_length_m = max(w.sewer_drain_length_m, 60.0)
+        st.session_state.w_est = generate_water_supply_estimate(df, w)
+
+    # Step 1: Photo Inspector
+    render_domain_photo_inspector(
+        domain_key="water",
+        domain_label="Water Pipeline & Sanitation Network",
+        on_apply_callback=apply_water_ai,
+        photo_help="Upload photographs of leaking pipelines, damaged valve chambers, corroded pipes, or water storage tanks."
+    )
+
+    st.markdown("#### 🚰 Step 2: Network Parameters & Storage Capacity")
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("##### 🚰 Pipeline Network")
         scheme = st.selectbox(
             "Water Supply Scheme Type",
             [
-                "Village / Layout Distribution Pipeline",
-                "Internal Facility Plumbing & Drainage",
+                "Distribution Pipeline & Fixtures",
                 "Dedicated Pumping Main & Overhead Reservoir",
+                "Internal Facility Plumbing & Drainage",
             ],
             key="w_scheme_input",
         )
@@ -227,72 +447,49 @@ def render_water_module(df: pd.DataFrame):
         )
 
     with col2:
-        st.markdown("##### 🏢 Storage & Sanitary Appurtenances")
-        tank_litres = st.number_input(
-            "Water Tank Capacity (Litres)",
+        tank_cap = st.number_input(
+            "Water Storage Tank Capacity (Litres)",
             min_value=500.0,
-            max_value=200000.0,
+            max_value=100000.0,
             value=float(w.storage_tank_litres),
             step=1000.0,
-            key="w_tank_input",
+            key="w_tank_cap_input",
         )
         tank_type = st.selectbox(
-            "Storage Reservoir Type",
-            ["Elevated RCC / Masonry", "Ground Sump", "Triple-layer HDPE"],
+            "Water Storage Reservoir Type",
+            ["Elevated RCC / Masonry", "Ground Sump", "Triple-layer HDPE Tank"],
             index=0,
-            key="w_ttype_input",
+            key="w_tank_type_input",
         )
-        chambers = st.number_input(
-            "Inspection Chambers (nos)",
-            min_value=1,
-            max_value=50,
-            value=int(w.inspection_chambers_count),
-            step=1,
-            key="w_cham_input",
-        )
-        fixtures = st.number_input(
-            "Sanitary Fixtures, Taps & Control Valves (nos)",
-            min_value=1,
-            max_value=100,
-            value=int(w.fixtures_count),
-            step=1,
-            key="w_fix_input",
-        )
-        sewer_len = st.number_input(
-            "Sewer / Drainage Line Length (m)",
-            min_value=0.0,
-            max_value=2000.0,
-            value=float(w.sewer_drain_length_m),
-            step=10.0,
-            key="w_sewer_input",
-        )
+        valves = st.number_input("Distribution Taps / Sluice Valves (nos)", min_value=1, max_value=50, value=int(w.fixtures_count), step=1, key="w_valves_input")
+        chambers = st.number_input("Brick Inspection Chambers / Manholes (nos)", min_value=1, max_value=50, value=int(w.inspection_chambers_count), step=1, key="w_chambers_input")
+        sewer_len = st.number_input("Sewer / Drainage Line Length (m)", min_value=0.0, max_value=5000.0, value=float(w.sewer_drain_length_m), step=10.0, key="w_sewer_input")
 
     # Update state
     w.scheme_type = scheme
     w.network_length_m = pipe_len
     w.pipe_diameter_mm = pipe_dia
     w.pipe_material = pipe_mat
-    w.storage_tank_litres = tank_litres
+    w.storage_tank_litres = tank_cap
     w.storage_tank_type = tank_type
+    w.fixtures_count = valves
     w.inspection_chambers_count = chambers
-    w.fixtures_count = fixtures
     w.sewer_drain_length_m = sewer_len
 
     # Live Metrics
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Pipe Run Length", f"{w.network_length_m:,.0f} m", f"{w.pipe_diameter_mm} mm {w.pipe_material}")
-    m2.metric("Trench Excavation", f"{w.trench_excavation_m3:,.1f} m³", "Standard trench width & depth")
-    m3.metric("Storage Reservoir", f"{w.storage_tank_litres:,.0f} L", f"{w.storage_tank_litres/1000:,.1f} m³")
-    m4.metric("Chambers & Fixtures", f"{w.inspection_chambers_count + w.fixtures_count} nos", f"{w.inspection_chambers_count} chambers")
+    m1.metric("Pipeline Length", f"{w.network_length_m:,.0f} m", f"Ø {w.pipe_diameter_mm} mm {w.pipe_material}")
+    m2.metric("Trench Excavation", f"{w.trench_excavation_m3:,.1f} m³", "Trench depth ~0.9m")
+    m3.metric("Water Reservoir", f"{w.storage_tank_litres:,.0f} L", f"{w.storage_tank_type.split()[0]}")
+    m4.metric("Sanitary Appurtenances", f"{w.inspection_chambers_count + w.fixtures_count} Units", f"{w.inspection_chambers_count} chambers")
 
-    # Interactive Visualizer
-    with st.expander("📐 Technical Distribution & Hydraulic Layout Diagram", expanded=True):
+    # Interactive CAD Visualizer
+    with st.expander("📐 Technical Pipeline Profile & Chamber Cross-Section", expanded=True):
         svg_code = render_water_supply_svg(w)
         st.markdown(svg_code, unsafe_allow_html=True)
 
-    # Generate Button
-    if st.button("🚰 Generate Water Supply & Sanitation BOQ", type="primary", use_container_width=True, key="btn_gen_water"):
-        with st.spinner("Compiling water supply schedule items from PWD SSR..."):
+    if st.button("🚰 Calculate Water Supply Cost & Generate Official BOQ", type="primary", use_container_width=True, key="btn_gen_water"):
+        with st.spinner("Extracting sanitary schedule items from Maharashtra PWD SSR..."):
             st.session_state.w_est = generate_water_supply_estimate(df, w)
             st.rerun()
 
@@ -308,7 +505,7 @@ def render_water_module(df: pd.DataFrame):
 # ============================================================
 
 def render_infra_module(df: pd.DataFrame):
-    """Render civil infrastructure facility estimation workflow."""
+    """Render civil infrastructure facility estimation workflow with AI photo inspection."""
     if "i_meas" not in st.session_state:
         st.session_state.i_meas = InfraMeasurements()
     if "i_est" not in st.session_state:
@@ -326,15 +523,29 @@ def render_infra_module(df: pd.DataFrame):
     </div>
     """, unsafe_allow_html=True)
 
+    # Callback for AI Auto Apply
+    def apply_infra_ai(results):
+        infra.compound_wall_length_m = max(infra.compound_wall_length_m, 120.0)
+        infra.storm_drain_length_m = max(infra.storm_drain_length_m, 150.0)
+        infra.internal_pavement_area_m2 = max(infra.internal_pavement_area_m2, 400.0)
+        st.session_state.i_est = generate_infra_estimate(df, infra)
+
+    # Step 1: Photo Inspector
+    render_domain_photo_inspector(
+        domain_key="infra",
+        domain_label="Site & Boundary Infrastructure",
+        on_apply_callback=apply_infra_ai,
+        photo_help="Upload photographs of cracked boundary walls, sunken paver blocks, collapsed roadside drains, or damaged culverts."
+    )
+
+    st.markdown("#### 🧱 Step 2: Site Dimensions & Campus Specifications")
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("##### 🧱 Boundary & Drainage")
         cw_len = st.number_input("Compound Wall Length (m)", min_value=0.0, value=float(infra.compound_wall_length_m), step=10.0, key="i_cw_l")
         cw_h = st.number_input("Compound Wall Height (m)", min_value=1.0, max_value=4.0, value=float(infra.compound_wall_height_m), step=0.2, key="i_cw_h")
         sd_len = st.number_input("Storm Water Drain Length (m)", min_value=0.0, value=float(infra.storm_drain_length_m), step=10.0, key="i_sd_l")
 
     with col2:
-        st.markdown("##### 🚶 Pavement & Appurtenances")
         paver_area = st.number_input("Internal Pavement / Walkway Area (m²)", min_value=0.0, value=float(infra.internal_pavement_area_m2), step=25.0, key="i_pv_a")
         pave_type = st.selectbox("Pavement Specification", ["Interlocking Paver Blocks", "Concrete M-20", "Bituminous"], index=0, key="i_pv_t")
         culverts = st.number_input("Cross Drainage Culverts (nos)", min_value=0, max_value=20, value=int(infra.culverts_count), step=1, key="i_culv")
@@ -356,7 +567,7 @@ def render_infra_module(df: pd.DataFrame):
     m3.metric("Pavement Area", f"{infra.internal_pavement_area_m2:,.0f} m²", f"{infra.pavement_type}")
     m4.metric("Culverts & Signs", f"{infra.culverts_count + infra.street_furniture_count} nos", f"{infra.culverts_count} culverts")
 
-    if st.button("🌐 Generate Infrastructure Facility BOQ", type="primary", use_container_width=True, key="btn_gen_infra"):
+    if st.button("🌐 Calculate Infrastructure Cost & Generate Official BOQ", type="primary", use_container_width=True, key="btn_gen_infra"):
         with st.spinner("Extracting infrastructure schedule items from PWD SSR..."):
             st.session_state.i_est = generate_infra_estimate(df, infra)
             st.rerun()
@@ -369,133 +580,116 @@ def render_infra_module(df: pd.DataFrame):
 
 
 # ============================================================
-# 4. AI STRUCTURAL CONCEPT & CAPEX PLANNER MODULE
+# 4. AI STRUCTURAL CONCEPT & CAPEX SYNTHESIZER
 # ============================================================
 
 def render_concept_module(df: pd.DataFrame):
-    """Render AI Structural Concept & Capex Synthesizer."""
+    """Render AI structural concept, IS 456 preliminary member sizing & material takeoffs."""
     if "s_concept" not in st.session_state:
         st.session_state.s_concept = None
 
     st.markdown("""
-    <div style="background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%); border: 1px solid rgba(99, 102, 241, 0.4); border-radius: 14px; padding: 18px 24px; margin-bottom: 20px;">
-        <span style="background: rgba(99, 102, 241, 0.25); color: #c7d2fe; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(99, 102, 241, 0.4);">
-            🧠 CHIEF STRUCTURAL ENGINEER AI
+    <div style="background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%); border: 1px solid rgba(129, 140, 248, 0.35); border-radius: 14px; padding: 18px 24px; margin-bottom: 20px;">
+        <span style="background: rgba(129, 140, 248, 0.2); color: #c7d2fe; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(129, 140, 248, 0.4);">
+            🧠 AI CHIEF STRUCTURAL ENGINEER WING
         </span>
-        <h2 style="color: #ffffff; margin: 8px 0 4px 0; font-size: 22px; font-weight: 800;">AI Structural Concept & Capex Blueprint</h2>
-        <p style="color: #94a3b8; margin: 0; font-size: 13px;">Translate architectural raw ideas into IS 456 preliminary member sizing, material volumes & project budget forecast.</p>
+        <h2 style="color: #ffffff; margin: 8px 0 4px 0; font-size: 22px; font-weight: 800;">AI Structural Concept & Preliminary Capex Synthesizer</h2>
+        <p style="color: #94a3b8; margin: 0; font-size: 13px;">IS 456:2000 Member Sizing, Material Takeoffs (Cement, Steel, Aggregates), and Capital Expenditure Breakdown.</p>
     </div>
     """, unsafe_allow_html=True)
 
-    # Preset Quick Buttons
-    st.markdown("###### ⚡ Quick PWD Project Presets")
-    p1, p2, p3, p4 = st.columns(4)
-    if p1.button("🏫 Primary School (G+2)", use_container_width=True):
-        st.session_state["c_title"] = "Zilla Parishad Model Primary School"
-        st.session_state["c_type"] = "Educational / School"
-        st.session_state["c_area"] = 4500.0
-        st.session_state["c_floors"] = 3
-        st.session_state["c_soil"] = "Medium Hard Murum / Clay"
-        st.session_state["c_notes"] = "6 classrooms, laboratory, staff room, and assembly verandah."
-    if p2.button("🏥 Rural Hospital (G+1)", use_container_width=True):
-        st.session_state["c_title"] = "Primary Health Center & Maternity Wing"
-        st.session_state["c_type"] = "Healthcare / Hospital"
-        st.session_state["c_area"] = 5500.0
-        st.session_state["c_floors"] = 2
-        st.session_state["c_soil"] = "Black Cotton / Swelling Clay"
-        st.session_state["c_notes"] = "OPD, 10-bed ward, sterile OT, emergency ramp, and medical storage."
-    if p3.button("🏢 Sub-Divisional Office", use_container_width=True):
-        st.session_state["c_title"] = "PWD Sub-Divisional Office & Citizens Hub"
-        st.session_state["c_type"] = "Government Office"
-        st.session_state["c_area"] = 4000.0
-        st.session_state["c_floors"] = 3
-        st.session_state["c_soil"] = "Medium Hard Murum / Clay"
-        st.session_state["c_notes"] = "Conference hall, executive chambers, server room, and record storage."
-    if p4.button("🏠 PMAY Mass Housing (G+3)", use_container_width=True):
-        st.session_state["c_title"] = "Affordable Housing EWS Block"
-        st.session_state["c_type"] = "Residential Apartment"
-        st.session_state["c_area"] = 8000.0
-        st.session_state["c_floors"] = 4
-        st.session_state["c_soil"] = "Hard Strata / Basalt Rock"
-        st.session_state["c_notes"] = "16 units of 1-BHK, dual staircases, and rainwater harvesting."
+    render_front_end_api_badge(key_prefix="concept_badge")
 
-    col1, col2 = st.columns([1.2, 1])
+    col1, col2 = st.columns(2)
     with col1:
-        p_title = st.text_input("Project Name / Title", value=st.session_state.get("c_title", "Proposed Community Facility"), key="c_p_title")
-        p_notes = st.text_area(
-            "Raw Idea of Structure & Special Requirements",
-            value=st.session_state.get("c_notes", "G+2 multi-purpose public building with conference hall and ground floor parking."),
-            placeholder="Describe your vision, room spans, functional needs, or site constraints...",
-            key="c_p_notes",
-            height=100,
+        st.markdown("##### 🏛️ Structure Characteristics")
+        title = st.text_input("Project / Scheme Title", value="Proposed Administrative Office Complex, Pune", key="sc_title")
+        b_type = st.selectbox(
+            "Structural Typology",
+            [
+                "Commercial Office Building (RCC Frame)",
+                "Residential Apartment Building (RCC Frame)",
+                "Hospital & Healthcare Facility",
+                "Educational Institute / School",
+                "Industrial Warehouse & PEB Shed",
+                "Community Center & Multi-purpose Hall",
+            ],
+            index=0,
+            key="sc_type",
         )
+        sqft = st.number_input("Total Built-up Area (sq.ft)", min_value=500.0, max_value=250000.0, value=8000.0, step=500.0, key="sc_sqft")
+        floors_t = st.selectbox("Elevation / Storey Configuration", ["G+1 (2 Storeys)", "G+2 (3 Storeys)", "G+3 (4 Storeys)", "G+4 (5 Storeys)", "G+6 (7 Storeys)"], index=2, key="sc_fl")
 
     with col2:
-        b_type = st.selectbox("Occupancy / Building Type", ["Residential", "Educational / School", "Healthcare / Hospital", "Government Office", "Commercial"], index=1, key="c_b_type")
-        c_area = st.number_input("Target Built-Up Area (sq.ft)", min_value=500.0, max_value=100000.0, value=float(st.session_state.get("c_area", 4000.0)), step=500.0, key="c_b_area")
-        c_floors = st.number_input("Number of Storeys", min_value=1, max_value=8, value=int(st.session_state.get("c_floors", 3)), step=1, key="c_b_fl")
-        c_soil = st.selectbox("Site Sub-Soil Condition", ["Medium Hard Murum / Clay", "Black Cotton / Swelling Clay", "Hard Strata / Basalt Rock", "Soft / Reclaimed Soil"], index=0, key="c_b_soil")
+        st.markdown("##### 🌍 Geotechnical & Material Specifications")
+        soil = st.selectbox(
+            "Founding Soil Strata",
+            ["Medium Hard Murrum (SBC 200 kN/m²)", "Hard Rock / Basalt (SBC 450 kN/m²)", "Black Cotton Soil (Expansive clay, SBC 100 kN/m²)", "Soft Clay / Waterlogged (SBC 80 kN/m²)"],
+            index=0,
+            key="sc_soil",
+        )
+        conc = st.selectbox("Preferred Concrete Grade", ["M-25", "M-20", "M-30", "M-35"], index=0, key="sc_conc")
+        steel = st.selectbox("Rebar Grade", ["Fe 500D (TMT High Ductility)", "Fe 550D", "Fe 500"], index=0, key="sc_steel")
+        notes = st.text_area("Special Architectural or Structural Requirements", placeholder="e.g. Earthquake zone III, column-free conference hall, basement parking", key="sc_notes")
 
-    if st.button("🧠 Synthesize Structural Concept & Capex Blueprint", type="primary", use_container_width=True):
-        with st.spinner("Synthesizing IS 456 preliminary member dimensions, material takeoffs & capex breakdown..."):
+    if st.button("⚡ Synthesize Structural Concept & Capex Breakdown", type="primary", use_container_width=True, key="btn_gen_concept"):
+        with st.spinner("Executing IS 456 preliminary member sizing algorithms and material takeoffs..."):
             concept = generate_structural_concept(
-                project_title=p_title,
+                project_title=title,
                 building_type=b_type,
-                built_up_area_sqft=c_area,
-                floors=c_floors,
-                soil_type=c_soil,
-                special_requirements=p_notes,
+                built_up_area_sqft=sqft,
+                floors_text=floors_t,
+                soil_type=soil,
+                concrete_grade=conc,
+                steel_grade=steel,
+                special_requirements=notes,
             )
             st.session_state.s_concept = concept
             st.rerun()
 
-    concept = st.session_state.s_concept
+    concept: StructuralConcept = st.session_state.s_concept
     if concept:
         st.markdown("---")
-        st.success(f"**Structural Concept Synthesized:** {concept.raw_idea_summary}")
+        st.markdown("### 📋 Preliminary Structural Takeoff & Member Sizing")
 
-        # Vector Graphic
-        st.markdown(render_structural_concept_svg(concept), unsafe_allow_html=True)
+        # Summary Banner
+        st.info(f"**Chief Structural Engineer's Synthesis:** {concept.raw_idea_summary}")
 
-        # Member Sizing & Materials Breakdown
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("#### 📐 IS 456 Structural Sizing Breakdown")
-            sizing_data = [
-                {"Structural Element": "Column Grid Spacing", "Preliminary Dimension": concept.column_grid_spacing},
-                {"Structural Element": "Column Cross-Section", "Preliminary Dimension": concept.column_size},
-                {"Structural Element": "Main Longitudinal Beam", "Preliminary Dimension": concept.beam_size},
-                {"Structural Element": "Two-Way Slab Panel", "Preliminary Dimension": concept.slab_thickness},
-                {"Structural Element": "Foundation Concept", "Preliminary Dimension": concept.foundation_concept},
-                {"Structural Element": "Concrete Grade", "Preliminary Dimension": concept.concrete_grade},
-                {"Structural Element": "Reinforcement Grade", "Preliminary Dimension": concept.steel_grade},
-            ]
-            st.dataframe(pd.DataFrame(sizing_data), hide_index=True, width="stretch")
+        # Member Sizing Cards
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Column Dimensions", concept.column_size.split(" with")[0], "IS 456 Minimum Sizing")
+        c2.metric("Main Beam Size", concept.beam_size.split(" with")[0], "Span/12 Rule")
+        c3.metric("Slab Thickness", concept.slab_thickness, "Span/28 Deflection Limit")
+        c4.metric("Foundation Scheme", concept.foundation_concept.split(" (")[0], soil.split(" (")[0])
 
-        with c2:
-            st.markdown("#### 📦 Material Consumption Forecast")
-            mat_data = [
-                {"Material": "Ready-Mix / In-Situ Concrete", "Quantity": f"{concept.estimated_concrete_m3:,.1f} m³", "Standard Unit": "Cubic Metres (cum)"},
-                {"Material": "TMT High-Ductility Rebar", "Quantity": f"{concept.estimated_steel_tonnes:,.2f} MT", "Standard Unit": "Metric Tonnes"},
-                {"Material": "OPC / PPC Cement", "Quantity": f"{concept.estimated_cement_bags:,} bags", "Standard Unit": "50 kg bags"},
-                {"Material": "River / VSI Crushed Sand", "Quantity": f"{concept.estimated_sand_brass:,.1f} Brass", "Standard Unit": "100 cu.ft (2.83 m³)"},
-                {"Material": "Coarse Metal Aggregate", "Quantity": f"{concept.estimated_aggregate_brass:,.1f} Brass", "Standard Unit": "100 cu.ft (2.83 m³)"},
-            ]
-            st.dataframe(pd.DataFrame(mat_data), hide_index=True, width="stretch")
+        # Material Takeoff Metrics
+        st.markdown("##### 🧱 Raw Material Takeoff Estimate")
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Design Concrete", f"{concept.estimated_concrete_m3:,.1f} m³", f"Grade {concept.concrete_grade}")
+        m2.metric("TMT Rebar", f"{concept.estimated_steel_tonnes:,.1f} MT", f"Grade {concept.steel_grade}")
+        m3.metric("Cement Required", f"{concept.estimated_cement_bags:,.0f} Bags", "~50 kg per bag")
+        m4.metric("Sand (River/Crushed)", f"{concept.estimated_sand_brass:,.1f} Brass", "1 brass = 100 cu.ft")
+        m5.metric("Coarse Aggregate", f"{concept.estimated_aggregate_brass:,.1f} Brass", "20mm & 10mm metal")
 
-        # Capex Expenditure Table
-        st.markdown("#### 💰 Capital Expenditure (Capex) Distribution")
-        tot = max(1.0, concept.cost_total_estimated)
-        capex_data = [
-            {"Stage / Sub-Work": "1. Substructure (Excavation, Footings, Plinth)", "Amount (₹)": f"₹ {concept.cost_substructure:,.2f}", "Share": f"{(concept.cost_substructure/tot)*100:.1f}%"},
-            {"Stage / Sub-Work": "2. Superstructure RCC Frame (Cols, Beams, Slabs)", "Amount (₹)": f"₹ {concept.cost_superstructure_rcc:,.2f}", "Share": f"{(concept.cost_superstructure_rcc/tot)*100:.1f}%"},
-            {"Stage / Sub-Work": "3. Masonry & Plastering Work", "Amount (₹)": f"₹ {concept.cost_masonry_plaster:,.2f}", "Share": f"{(concept.cost_masonry_plaster/tot)*100:.1f}%"},
-            {"Stage / Sub-Work": "4. Architectural Finishing, Tiles & Openings", "Amount (₹)": f"₹ {concept.cost_finishing_flooring_doors:,.2f}", "Share": f"{(concept.cost_finishing_flooring_doors/tot)*100:.1f}%"},
-            {"Stage / Sub-Work": "5. MEP Services (Plumbing, Sanitary, Electrical)", "Amount (₹)": f"₹ {concept.cost_plumbing_electrical:,.2f}", "Share": f"{(concept.cost_plumbing_electrical/tot)*100:.1f}%"},
+        # Interactive SVG Scheme
+        with st.expander("📐 Technical Column Grid Layout & Load Transfer Diagram", expanded=True):
+            svg_code = render_structural_concept_svg(concept)
+            st.markdown(svg_code, unsafe_allow_html=True)
+
+        # Capex Breakdown Table
+        st.markdown("##### 💰 Capital Expenditure Breakdown (By Structural Domain)")
+        capex_rows = [
+            {"Stage": "1. Foundation & Substructure", "Scope": f"Excavation, PCC, {concept.foundation_concept}, Plinth beams", "Estimated Cost (₹)": concept.cost_substructure},
+            {"Stage": "2. Superstructure RCC Framework", "Scope": f"Columns, beams, slabs ({concept.concrete_grade} + {concept.steel_grade})", "Estimated Cost (₹)": concept.cost_superstructure_rcc},
+            {"Stage": "3. Masonry & Plastering", "Scope": "External 230mm AAC/fly ash walls, internal partitions, 2-coat plaster", "Estimated Cost (₹)": concept.cost_masonry_plaster},
+            {"Stage": "4. Flooring, Doors & Finishing", "Scope": "Vitrified tiles, flush doors, anodized aluminium windows, painting", "Estimated Cost (₹)": concept.cost_finishing_flooring_doors},
+            {"Stage": "5. Plumbing & Electrical MEP", "Scope": "Concealed conduits, copper wiring, CPVC water lines, sanitaryware", "Estimated Cost (₹)": concept.cost_plumbing_electrical},
         ]
-        st.dataframe(pd.DataFrame(capex_data), hide_index=True, width="stretch")
+        capex_df = pd.DataFrame(capex_rows)
+        capex_df["Cost (Lakhs)"] = capex_df["Estimated Cost (₹)"].apply(lambda x: f"₹ {x/1e5:.2f} L")
+        st.dataframe(capex_df[["Stage", "Scope", "Cost (Lakhs)"]], hide_index=True, use_container_width=True)
 
-        # Statutory PWD Totals
+        # Statutory Project Grand Total
         gst = concept.cost_total_estimated * 0.18
         cess = concept.cost_total_estimated * 0.01
         cont = concept.cost_total_estimated * 0.04
@@ -514,11 +708,11 @@ def render_concept_module(df: pd.DataFrame):
 
 
 # ============================================================
-# REUSABLE BOQ & STATUTORY SUMMARY RENDERER
+# REUSABLE BOQ & STATUTORY SUMMARY RENDERER (KEYERROR SAFE)
 # ============================================================
 
 def _render_boq_and_kpis(estimate: CostEstimate, export_filename: str, state_key: str):
-    """Render statutory PWD cost cards and editable Bill of Quantities."""
+    """Render statutory PWD cost cards and editable Bill of Quantities without KeyError."""
     subtotal = estimate.subtotal
     gst = estimate.gst_amount
     cess = round(subtotal * 0.01, 2)
@@ -534,32 +728,54 @@ def _render_boq_and_kpis(estimate: CostEstimate, export_filename: str, state_key
 
     # Editable Itemized BOQ Table
     st.markdown("##### 📋 Official Bill of Quantities (BOQ)")
-    table_df = get_estimate_display_df(estimate)
-    table_df.insert(0, "Remove", False)
+
+    table_rows = []
+    for item in estimate.items:
+        table_rows.append({
+            "Remove": False,
+            "ID": item.id,
+            "Item No": item.item_no,
+            "Chapter": item.chapter,
+            "Description": item.description,
+            "Unit": item.unit,
+            "Rate (₹)": item.rate,
+            "Quantity": item.quantity,
+            "Amount (₹)": item.amount,
+            "Note": item.calculation_note,
+        })
+
+    table_df = pd.DataFrame(table_rows)
 
     edited_table = st.data_editor(
         table_df,
         disabled=["ID", "Item No", "Chapter", "Description", "Unit", "Rate (₹)", "Amount (₹)", "Note"],
         column_config={
+            "ID": None,  # Hide ID column completely
             "Remove": st.column_config.CheckboxColumn("Drop", default=False),
-            "Quantity": st.column_config.NumberColumn("Quantity", min_value=0.0, step=1.0),
+            "Quantity": st.column_config.NumberColumn("Quantity", min_value=0.0, step=0.01),
+            "Rate (₹)": st.column_config.NumberColumn("Rate (₹)", format="%.2f"),
+            "Amount (₹)": st.column_config.NumberColumn("Amount (₹)", format="%.2f"),
         },
+        hide_index=True,
         use_container_width=True,
         key=f"editor_{state_key}",
     )
 
-    # Handle inline updates
+    # Handle inline updates safely
     items_to_remove = set()
     updated_quantities = {}
     has_changes = False
 
     for _, r in edited_table.iterrows():
-        iid = int(r["ID"])
-        if bool(r["Remove"]):
+        raw_id = r.get("ID")
+        if raw_id is None or pd.isna(raw_id):
+            continue
+        iid = int(raw_id)
+        if bool(r.get("Remove", False)):
             items_to_remove.add(iid)
             has_changes = True
         else:
-            new_q = float(r["Quantity"])
+            new_q = float(r.get("Quantity", 0.0))
             matching = next((it for it in estimate.items if it.id == iid), None)
             if matching and abs(matching.quantity - new_q) > 1e-4:
                 updated_quantities[iid] = new_q
