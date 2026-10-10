@@ -42,6 +42,9 @@ from schemas import (
     CostEstimate,
     EstimateLineItem,
     ProjectMeasurements,
+    BuildingMeasurements,
+    WaterSupplyMeasurements,
+    InfraMeasurements,
 )
 from ssr_loader import (
     load_ssr,
@@ -84,6 +87,25 @@ REPAIR = [
     "Road Miscellaneous items", "Road Furniture", "Road Safety", "Cross Drainage Works",
 ]
 
+BUILDING_PRESETS = [
+    "Excavation", "Reinforced Cement Concrete", "Brick Masonry",
+    "Plastering and Pointing", "Paving Flooring and dado",
+    "Doors and Windows", "Roofing and Ceiling", "Colouring",
+    "Oil Painting", "Water Supply and Sanitary Fitting",
+]
+
+WATER_SUPPLY_PRESETS = [
+    "Water Supply and Sanitary Fitting", "Cross Drainage Works",
+    "Excavation", "Reinforced Cement Concrete",
+]
+
+INFRA_PRESETS = [
+    "Excavation", "Cross Drainage Works", "Road Sub Base and Base Course",
+    "Road Miscellaneous items", "Road Furniture", "Road Safety",
+    "Brick Masonry", "Reinforced Cement Concrete",
+    "Water Supply and Sanitary Fitting",
+]
+
 REQUIRED_COLUMNS = ["id", "item_no", "chapter", "description", "unit", "rate", "kind"]
 
 
@@ -124,6 +146,21 @@ def get_project_preset_chapters(
         wanted = REPAIR
 
     return match_chapters(all_chapters, wanted)
+
+
+def get_building_preset_chapters(all_chapters: list[str]) -> list[str]:
+    """Return active matching chapters for building construction."""
+    return match_chapters(all_chapters, BUILDING_PRESETS)
+
+
+def get_water_supply_preset_chapters(all_chapters: list[str]) -> list[str]:
+    """Return active matching chapters for water supply and sanitation."""
+    return match_chapters(all_chapters, WATER_SUPPLY_PRESETS)
+
+
+def get_infra_preset_chapters(all_chapters: list[str]) -> list[str]:
+    """Return active matching chapters for site & civil infrastructure."""
+    return match_chapters(all_chapters, INFRA_PRESETS)
 
 
 def get_ssr_summary(df: pd.DataFrame) -> dict:
@@ -280,6 +317,257 @@ def generate_estimate(
     notes = {item_id: res[1] for item_id, res in qty_results.items()}
 
     # 4. Build deterministic CostEstimate
+    return build_estimate(
+        df=df,
+        selected=selected_quantities,
+        gst_percent=gst_percent,
+        calculation_notes=notes,
+    )
+
+
+def _find_ssr_item_id(df: pd.DataFrame, chapters: list[str] | None = None, keywords: list[str] | None = None) -> int | None:
+    """Find the best matching SSR item ID with a valid rate."""
+    res = search(df, chapters=chapters, keywords=keywords)
+    if not res.empty:
+        valid = res[res["rate"] > 0]
+        if not valid.empty:
+            return int(valid.iloc[0]["id"])
+        return int(res.iloc[0]["id"])
+    return None
+
+
+def generate_building_estimate(
+    df: pd.DataFrame,
+    measurements: BuildingMeasurements,
+    allowed_chapters: list[str] | None = None,
+    gst_percent: float = 18.0,
+) -> CostEstimate:
+    """Generate a Bill of Quantities (BOQ) and cost estimate for building construction."""
+    if df is None or df.empty:
+        return CostEstimate(gst_percent=gst_percent)
+
+    item_ids = []
+
+    # 1. Foundation Excavation
+    eid = _find_ssr_item_id(df, ["Excavation"], ["foundation"]) or _find_ssr_item_id(df, ["Excavation"], ["earth"])
+    if eid is not None:
+        item_ids.append(eid)
+
+    # 2. RCC Concrete (M-20, M-25, or M-30)
+    cid = (
+        _find_ssr_item_id(df, ["Reinforced Cement Concrete"], [measurements.concrete_grade])
+        or _find_ssr_item_id(df, ["Reinforced Cement Concrete"], ["M-25"])
+        or _find_ssr_item_id(df, ["Reinforced Cement Concrete"], ["concrete"])
+    )
+    if cid is not None:
+        item_ids.append(cid)
+
+    # 3. Fe 500 TMT Steel Reinforcement
+    sid = _find_ssr_item_id(df, ["Reinforced Cement Concrete"], ["TMT", "FE"]) or _find_ssr_item_id(df, None, ["TMT", "FE 500"])
+    if sid is not None:
+        item_ids.append(sid)
+
+    # 4. Brick Masonry
+    bid = _find_ssr_item_id(df, ["Brick Masonry"], ["brick"]) or _find_ssr_item_id(df, None, ["brick", "masonry"])
+    if bid is not None:
+        item_ids.append(bid)
+
+    # 5. Internal/External Plastering
+    pid = _find_ssr_item_id(df, ["Plastering and Pointing"], ["cement plaster"]) or _find_ssr_item_id(df, ["Plastering and Pointing"], ["plaster"])
+    if pid is not None:
+        item_ids.append(pid)
+
+    # 6. Flooring & Dado
+    fid = (
+        _find_ssr_item_id(df, ["Paving Flooring and dado"], ["flooring"])
+        or _find_ssr_item_id(df, ["Paving Flooring and dado"], ["tiles"])
+        or _find_ssr_item_id(df, ["Paving Flooring and dado"], ["cement concrete"])
+    )
+    if fid is not None:
+        item_ids.append(fid)
+
+    # 7. Doors and Windows (if selected)
+    if measurements.include_doors_windows:
+        did = _find_ssr_item_id(df, ["Doors and Windows"], ["shutter"]) or _find_ssr_item_id(df, ["Doors and Windows"], ["frame"])
+        if did is not None:
+            item_ids.append(did)
+
+    # 8. Painting / Whitewash (if finishing selected)
+    if measurements.include_finishing:
+        paid = (
+            _find_ssr_item_id(df, ["Colouring"], ["white-wash"])
+            or _find_ssr_item_id(df, ["Colouring"], ["coat"])
+            or _find_ssr_item_id(df, ["Oil Painting"], ["painting"])
+        )
+        if paid is not None:
+            item_ids.append(paid)
+
+        rid = _find_ssr_item_id(df, ["Roofing and Ceiling"], ["ceiling"]) or _find_ssr_item_id(df, ["Roofing and Ceiling"], ["sheet"])
+        if rid is not None:
+            item_ids.append(rid)
+
+    # 9. Plumbing Fixture (if selected)
+    if measurements.include_plumbing:
+        plid = _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["heavy grade"]) or _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["pipe"])
+        if plid is not None:
+            item_ids.append(plid)
+
+    valid_ids = list(dict.fromkeys([i for i in item_ids if i is not None and i in df.index]))
+    if not valid_ids:
+        return CostEstimate(gst_percent=gst_percent, warnings=["No building SSR items found in schedule."])
+
+    qty_results = calculate_all_quantities(df, valid_ids, measurements)
+    selected_quantities = {item_id: res[0] for item_id, res in qty_results.items()}
+    notes = {item_id: res[1] for item_id, res in qty_results.items()}
+
+    return build_estimate(
+        df=df,
+        selected=selected_quantities,
+        gst_percent=gst_percent,
+        calculation_notes=notes,
+    )
+
+
+def generate_water_supply_estimate(
+    df: pd.DataFrame,
+    measurements: WaterSupplyMeasurements,
+    allowed_chapters: list[str] | None = None,
+    gst_percent: float = 18.0,
+) -> CostEstimate:
+    """Generate a Bill of Quantities (BOQ) and cost estimate for water supply and sanitation works."""
+    if df is None or df.empty:
+        return CostEstimate(gst_percent=gst_percent)
+
+    item_ids = []
+
+    # 1. Main Pipeline Supply & Laying
+    pid = (
+        _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], [f"{measurements.pipe_diameter_mm} mm"])
+        or _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["heavy grade"])
+        or _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["pipes"])
+    )
+    if pid is not None:
+        item_ids.append(pid)
+
+    # 2. Trench Excavation
+    tid = _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["trench"]) or _find_ssr_item_id(df, ["Excavation"], ["foundation"])
+    if tid is not None:
+        item_ids.append(tid)
+
+    # 3. Inspection Chambers
+    cid = (
+        _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["inspection chamber"])
+        or _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["brick"])
+        or _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["chamber"])
+    )
+    if cid is not None:
+        item_ids.append(cid)
+
+    # 4. Taps / Valves / Bib Cocks
+    vid = (
+        _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["cock"])
+        or _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["ferrule"])
+        or _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["tap"])
+    )
+    if vid is not None:
+        item_ids.append(vid)
+
+    # 5. Drainage / Sewer Pipe
+    did = (
+        _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["salt glazed"])
+        or _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["concrete pipes"])
+        or _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["soil"])
+    )
+    if did is not None:
+        item_ids.append(did)
+
+    # 6. Reservoir / Storage Tank Cleaning / Civil Work
+    rid = _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["reservoir"]) or _find_ssr_item_id(df, ["Water Supply and Sanitary Fitting"], ["tank"])
+    if rid is not None:
+        item_ids.append(rid)
+
+    valid_ids = list(dict.fromkeys([i for i in item_ids if i is not None and i in df.index]))
+    if not valid_ids:
+        return CostEstimate(gst_percent=gst_percent, warnings=["No water supply SSR items found in schedule."])
+
+    qty_results = calculate_all_quantities(df, valid_ids, measurements)
+    selected_quantities = {item_id: res[0] for item_id, res in qty_results.items()}
+    notes = {item_id: res[1] for item_id, res in qty_results.items()}
+
+    return build_estimate(
+        df=df,
+        selected=selected_quantities,
+        gst_percent=gst_percent,
+        calculation_notes=notes,
+    )
+
+
+def generate_infra_estimate(
+    df: pd.DataFrame,
+    measurements: InfraMeasurements,
+    allowed_chapters: list[str] | None = None,
+    gst_percent: float = 18.0,
+) -> CostEstimate:
+    """Generate a Bill of Quantities (BOQ) and cost estimate for site and civil infrastructure."""
+    if df is None or df.empty:
+        return CostEstimate(gst_percent=gst_percent)
+
+    item_ids = []
+
+    # 1. Storm Water Drain
+    did = (
+        _find_ssr_item_id(df, ["Cross Drainage Works"], ["running metre"])
+        or _find_ssr_item_id(df, ["Cross Drainage Works"], ["drain"])
+        or _find_ssr_item_id(df, ["Cross Drainage Works"], ["cubic metre"])
+    )
+    if did is not None:
+        item_ids.append(did)
+
+    # 2. Compound Wall Masonry
+    mid = _find_ssr_item_id(df, ["Brick Masonry"], ["brick"]) or _find_ssr_item_id(df, ["Reinforced Cement Concrete"], ["concrete"])
+    if mid is not None:
+        item_ids.append(mid)
+
+    # 3. Excavation for drains and walls
+    eid = _find_ssr_item_id(df, ["Excavation"], ["earth"]) or _find_ssr_item_id(df, ["Excavation"], ["foundation"])
+    if eid is not None:
+        item_ids.append(eid)
+
+    # 4. Internal Paver Block Pavement
+    pid = (
+        _find_ssr_item_id(df, ["Paving Flooring and dado"], ["flooring"])
+        or _find_ssr_item_id(df, ["Paving Flooring and dado"], ["tiles"])
+        or _find_ssr_item_id(df, ["Road Sub Base and Base Course"], ["granular"])
+    )
+    if pid is not None:
+        item_ids.append(pid)
+
+    # 5. Cross Drainage Culverts
+    cid = (
+        _find_ssr_item_id(df, ["Cross Drainage Works"], ["pipe"])
+        or _find_ssr_item_id(df, ["Cross Drainage Works"], ["culvert"])
+        or _find_ssr_item_id(df, ["Cross Drainage Works"], ["one number"])
+    )
+    if cid is not None:
+        item_ids.append(cid)
+
+    # 6. Road Furniture / Signage
+    fid = (
+        _find_ssr_item_id(df, ["Road Furniture"], ["board"])
+        or _find_ssr_item_id(df, ["Road Furniture"], ["sign"])
+        or _find_ssr_item_id(df, ["Road Furniture"], ["furniture"])
+    )
+    if fid is not None:
+        item_ids.append(fid)
+
+    valid_ids = list(dict.fromkeys([i for i in item_ids if i is not None and i in df.index]))
+    if not valid_ids:
+        return CostEstimate(gst_percent=gst_percent, warnings=["No infrastructure SSR items found in schedule."])
+
+    qty_results = calculate_all_quantities(df, valid_ids, measurements)
+    selected_quantities = {item_id: res[0] for item_id, res in qty_results.items()}
+    notes = {item_id: res[1] for item_id, res in qty_results.items()}
+
     return build_estimate(
         df=df,
         selected=selected_quantities,

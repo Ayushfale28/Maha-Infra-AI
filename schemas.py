@@ -356,3 +356,198 @@ class CostEstimate:
             "total": self.total,
             "warnings": self.warnings,
         }
+
+
+# ============================================================
+# BUILDING MEASUREMENTS
+# ============================================================
+
+@dataclass
+class BuildingMeasurements:
+    """Project parameters for Building Construction estimation."""
+    building_type: str = "Residential (G+1)"  # Residential | Commercial | Institutional | School
+    plinth_area_m2: float = 120.0             # Plinth area per floor in sqm
+    floors: int = 2                           # Total floors including Ground
+    floor_height_m: float = 3.0               # Floor height in metres
+    foundation_type: str = "Isolated Footing" # Isolated Footing | Raft Foundation | Pile Foundation
+    structure_type: str = "RCC Framed Structure"  # RCC Framed Structure | Load Bearing Masonry
+    concrete_grade: str = "M-25"              # M-20 | M-25 | M-30
+    include_doors_windows: bool = True
+    include_finishing: bool = True            # Plaster, flooring, painting
+    include_plumbing: bool = True             # Internal water supply & sanitation
+
+    @property
+    def total_built_up_area_m2(self) -> float:
+        return round(self.plinth_area_m2 * max(1, self.floors), 2)
+
+    @property
+    def total_built_up_area_sqft(self) -> float:
+        return round(self.total_built_up_area_m2 * 10.7639, 2)
+
+    @property
+    def approx_excavation_m3(self) -> float:
+        factor = 1.4 if "Raft" in self.foundation_type else (2.0 if "Pile" in self.foundation_type else 0.85)
+        return round(self.plinth_area_m2 * factor, 2)
+
+    @property
+    def approx_concrete_m3(self) -> float:
+        # PWD rule of thumb: 0.038 - 0.045 m3 of RCC per sqm of built-up area
+        mult = 0.042 if "Raft" in self.foundation_type else 0.038
+        return round(self.total_built_up_area_m2 * mult, 2)
+
+    @property
+    def approx_steel_tonnes(self) -> float:
+        # IS 456 thumb rule: ~80 to 95 kg steel per m3 concrete in framed building
+        return round((self.approx_concrete_m3 * 85.0) / 1000.0, 3)
+
+    @property
+    def approx_brickwork_m3(self) -> float:
+        return round(self.total_built_up_area_m2 * 0.18, 2)
+
+    @property
+    def approx_plaster_m2(self) -> float:
+        return round(self.total_built_up_area_m2 * 2.3, 2)
+
+    @property
+    def approx_flooring_m2(self) -> float:
+        return round(self.total_built_up_area_m2 * 0.82, 2)
+
+    def validate(self) -> list[str]:
+        warnings = []
+        if self.plinth_area_m2 <= 0:
+            warnings.append("Plinth area must be greater than zero.")
+        if self.floors < 1:
+            warnings.append("Number of floors must be at least 1.")
+        return warnings
+
+
+# ============================================================
+# WATER SUPPLY & SANITARY MEASUREMENTS
+# ============================================================
+
+@dataclass
+class WaterSupplyMeasurements:
+    """Project parameters for Water Supply & Sanitation works."""
+    scheme_type: str = "Distribution Pipeline & Fixtures"
+    network_length_m: float = 350.0           # Total running length of pipe in metres
+    pipe_diameter_mm: int = 25                # 15, 20, 25, 32, 40, 50, 80, 100, 150
+    pipe_material: str = "GI Heavy Grade"     # GI Heavy Grade | Cast Iron | PVC / UPVC | Concrete NP
+    storage_tank_litres: float = 5000.0       # Water tank capacity in Litres
+    storage_tank_type: str = "Elevated RCC / Masonry"  # Elevated RCC / Masonry | Ground Sump | Triple-layer HDPE
+    inspection_chambers_count: int = 4
+    fixtures_count: int = 8                   # Taps, bib cocks, valves
+    sewer_drain_length_m: float = 60.0        # Drainage / sewer pipe line
+
+    @property
+    def trench_excavation_m3(self) -> float:
+        depth = 0.9 if self.pipe_diameter_mm >= 80 else 0.65
+        width = 0.6 if self.pipe_diameter_mm >= 80 else 0.45
+        return round(self.network_length_m * depth * width, 2)
+
+    def validate(self) -> list[str]:
+        warnings = []
+        if self.network_length_m <= 0:
+            warnings.append("Network length must be greater than zero.")
+        return warnings
+
+
+# ============================================================
+# INTEGRATED INFRASTRUCTURE MEASUREMENTS
+# ============================================================
+
+@dataclass
+class InfraMeasurements:
+    """Project parameters for Site & Civil Infrastructure."""
+    project_name: str = "Site Infrastructure Facility"
+    compound_wall_length_m: float = 120.0
+    compound_wall_height_m: float = 1.8
+    storm_drain_length_m: float = 150.0
+    storm_drain_width_m: float = 0.6
+    storm_drain_depth_m: float = 0.6
+    internal_pavement_area_m2: float = 400.0
+    pavement_type: str = "Interlocking Paver Blocks"  # Interlocking Paver Blocks | Concrete M-20 | Bituminous
+    culverts_count: int = 2
+    street_furniture_count: int = 8            # Signboards, bollards, kerb stones
+
+    @property
+    def compound_wall_area_m2(self) -> float:
+        return round(self.compound_wall_length_m * self.compound_wall_height_m, 2)
+
+    @property
+    def storm_drain_volume_m3(self) -> float:
+        return round(self.storm_drain_length_m * self.storm_drain_width_m * self.storm_drain_depth_m, 2)
+
+    def validate(self) -> list[str]:
+        warnings = []
+        if self.compound_wall_length_m < 0 or self.storm_drain_length_m < 0:
+            warnings.append("Measurements cannot be negative.")
+        return warnings
+
+
+# ============================================================
+# AI STRUCTURAL CONCEPT & CAPEX PLANNER
+# ============================================================
+
+@dataclass
+class StructuralConcept:
+    """Civil Engineering preliminary structural concept & capex breakdown."""
+    project_title: str = ""
+    building_type: str = ""
+    built_up_area_sqft: float = 0.0
+    built_up_area_sqm: float = 0.0
+    floors_text: str = ""
+    foundation_concept: str = ""
+    column_grid_spacing: str = ""
+    column_size: str = ""
+    beam_size: str = ""
+    slab_thickness: str = ""
+    concrete_grade: str = "M-25"
+    steel_grade: str = "Fe 500D"
+
+    # Material Consumption
+    estimated_concrete_m3: float = 0.0
+    estimated_steel_tonnes: float = 0.0
+    estimated_cement_bags: int = 0
+    estimated_sand_brass: float = 0.0
+    estimated_aggregate_brass: float = 0.0
+
+    # Capex Breakdown in Rupees
+    cost_substructure: float = 0.0
+    cost_superstructure_rcc: float = 0.0
+    cost_masonry_plaster: float = 0.0
+    cost_finishing_flooring_doors: float = 0.0
+    cost_plumbing_electrical: float = 0.0
+    cost_total_estimated: float = 0.0
+
+    engineering_guidelines: list[str] = field(default_factory=list)
+    raw_idea_summary: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "project_title": self.project_title,
+            "building_type": self.building_type,
+            "built_up_area_sqft": self.built_up_area_sqft,
+            "built_up_area_sqm": self.built_up_area_sqm,
+            "floors_text": self.floors_text,
+            "foundation_concept": self.foundation_concept,
+            "column_grid_spacing": self.column_grid_spacing,
+            "column_size": self.column_size,
+            "beam_size": self.beam_size,
+            "slab_thickness": self.slab_thickness,
+            "concrete_grade": self.concrete_grade,
+            "steel_grade": self.steel_grade,
+            "estimated_concrete_m3": self.estimated_concrete_m3,
+            "estimated_steel_tonnes": self.estimated_steel_tonnes,
+            "estimated_cement_bags": self.estimated_cement_bags,
+            "estimated_sand_brass": self.estimated_sand_brass,
+            "estimated_aggregate_brass": self.estimated_aggregate_brass,
+            "cost_substructure": self.cost_substructure,
+            "cost_superstructure_rcc": self.cost_superstructure_rcc,
+            "cost_masonry_plaster": self.cost_masonry_plaster,
+            "cost_finishing_flooring_doors": self.cost_finishing_flooring_doors,
+            "cost_plumbing_electrical": self.cost_plumbing_electrical,
+            "cost_total_estimated": self.cost_total_estimated,
+            "engineering_guidelines": self.engineering_guidelines,
+            "raw_idea_summary": self.raw_idea_summary,
+        }
+

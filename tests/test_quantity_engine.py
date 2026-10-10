@@ -81,6 +81,35 @@ class TestQuantityEngine(unittest.TestCase):
         note_manual = quantity_note("weight", 0.0)
         self.assertIn("manual", note_manual.lower())
 
+    def test_building_and_water_infra_quantities(self):
+        from schemas import BuildingMeasurements, WaterSupplyMeasurements, InfraMeasurements
+        from quantity_engine import (
+            calculate_building_quantity,
+            calculate_water_supply_quantity,
+            calculate_infra_quantity,
+        )
+
+        b = BuildingMeasurements(plinth_area_m2=150.0, floors=2)
+        exc_qty = calculate_building_quantity("volume", "Excavation for foundation", "Excavation", b)
+        self.assertAlmostEqual(exc_qty, b.approx_excavation_m3)
+
+        rcc_qty = calculate_building_quantity("volume", "RCC concrete M-25", "Reinforced Cement Concrete", b)
+        self.assertAlmostEqual(rcc_qty, b.approx_concrete_m3)
+
+        steel_qty = calculate_building_quantity("weight", "TMT Fe 500 steel", "Reinforced Cement Concrete", b, unit="Metric Tonne")
+        self.assertAlmostEqual(steel_qty, b.approx_steel_tonnes)
+
+        w = WaterSupplyMeasurements(network_length_m=300.0, pipe_diameter_mm=25, fixtures_count=6)
+        pipe_qty = calculate_water_supply_quantity("length", "GI pipe 25mm", "Water Supply", w)
+        self.assertEqual(pipe_qty, 300.0)
+
+        fixture_qty = calculate_water_supply_quantity("nos", "Bib cock brass", "Water Supply", w)
+        self.assertEqual(fixture_qty, 6.0)
+
+        infra = InfraMeasurements(compound_wall_length_m=100.0, storm_drain_length_m=80.0)
+        wall_qty = calculate_infra_quantity("length", "Compound wall", "Brick Masonry", infra)
+        self.assertEqual(wall_qty, 100.0)
+
 
 if __name__ == "__main__":
     unittest.main()

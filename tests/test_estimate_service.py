@@ -124,6 +124,34 @@ class TestEstimateService(unittest.TestCase):
         self.assertEqual(len(combined["defects"]), 2)
         self.assertEqual(len(combined["suggested_works"]), 2)
 
+    def test_building_and_water_infra_estimates(self):
+        from schemas import BuildingMeasurements, WaterSupplyMeasurements, InfraMeasurements
+        from estimate_service import (
+            generate_building_estimate,
+            generate_water_supply_estimate,
+            generate_infra_estimate,
+        )
+
+        rich_df = pd.DataFrame([
+            {"id": 1, "item_no": "21.01", "chapter": "Excavation", "description": "Excavation for foundation in earth", "unit": "cum", "rate": 200.0, "kind": "volume"},
+            {"id": 2, "item_no": "25.13", "chapter": "Reinforced Cement Concrete", "description": "RCC M-25 in situ", "unit": "cum", "rate": 7200.0, "kind": "volume"},
+            {"id": 3, "item_no": "41.10", "chapter": "Water Supply and Sanitary Fitting", "description": "Providing 25 mm heavy grade pipe", "unit": "rm", "rate": 450.0, "kind": "length"},
+            {"id": 4, "item_no": "11.08", "chapter": "Cross Drainage Works", "description": "Roadside drain running metre", "unit": "rm", "rate": 1900.0, "kind": "length"},
+        ]).set_index("id", drop=False)
+
+        b_est = generate_building_estimate(rich_df, BuildingMeasurements(plinth_area_m2=100.0, floors=2))
+        self.assertGreater(len(b_est.items), 0)
+        self.assertGreater(b_est.subtotal, 0)
+        self.assertGreater(b_est.total, 0)
+
+        w_est = generate_water_supply_estimate(rich_df, WaterSupplyMeasurements(network_length_m=150.0, pipe_diameter_mm=25))
+        self.assertGreater(len(w_est.items), 0)
+        self.assertGreater(w_est.total, 0)
+
+        i_est = generate_infra_estimate(rich_df, InfraMeasurements(storm_drain_length_m=50.0))
+        self.assertGreater(len(i_est.items), 0)
+        self.assertGreater(i_est.total, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

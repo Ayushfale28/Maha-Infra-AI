@@ -108,6 +108,37 @@ class TestSchemas(unittest.TestCase):
         self.assertEqual(estimate.total, 66080.0)
         self.assertEqual(len(estimate.warnings), 0)
 
+    def test_building_measurements(self):
+        from schemas import BuildingMeasurements
+        b = BuildingMeasurements(plinth_area_m2=100.0, floors=2)
+        self.assertEqual(b.total_built_up_area_m2, 200.0)
+        self.assertAlmostEqual(b.total_built_up_area_sqft, 2152.78, places=1)
+        self.assertGreater(b.approx_concrete_m3, 0)
+        self.assertGreater(b.approx_steel_tonnes, 0)
+        self.assertEqual(b.validate(), [])
+
+    def test_water_supply_and_infra_measurements(self):
+        from schemas import WaterSupplyMeasurements, InfraMeasurements, StructuralConcept
+        w = WaterSupplyMeasurements(network_length_m=200.0, pipe_diameter_mm=25)
+        self.assertEqual(w.network_length_m, 200.0)
+        self.assertGreater(w.trench_excavation_m3, 0)
+        self.assertEqual(w.validate(), [])
+
+        infra = InfraMeasurements(compound_wall_length_m=50.0, storm_drain_length_m=60.0)
+        self.assertEqual(infra.compound_wall_area_m2, 90.0)
+        self.assertEqual(infra.validate(), [])
+
+        concept = StructuralConcept(
+            project_title="Community Hall",
+            building_type="Institutional",
+            built_up_area_sqft=2000.0,
+            floors_text="G+1",
+            cost_total_estimated=3500000.0,
+        )
+        d = concept.to_dict()
+        self.assertEqual(d["project_title"], "Community Hall")
+        self.assertEqual(d["cost_total_estimated"], 3500000.0)
+
 
 if __name__ == "__main__":
     unittest.main()

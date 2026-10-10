@@ -27,7 +27,13 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from schemas import AnalysisResult, DefectObservation, SuggestedParameter, SuggestedWork
+from schemas import (
+    AnalysisResult,
+    DefectObservation,
+    SuggestedParameter,
+    SuggestedWork,
+    StructuralConcept,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 PHOTO_PROMPT_PATH = BASE_DIR / "road_photo_prompt.xml"
@@ -64,19 +70,68 @@ SITE_NAME = os.getenv("OPENROUTER_SITE_NAME", "Road Cost Estimator")
 # ============================================================
 
 def get_api_key() -> str:
-    """Retrieve API key securely from Streamlit secrets, session state, or environment."""
+    """Retrieve API key securely from Streamlit session state, secrets, environment, or direct local config files."""
+    # 1. Check Streamlit session state (user UI input)
     try:
         import streamlit as st
-        # Check session state (sidebar input if provided)
         if "api_key" in st.session_state and st.session_state["api_key"]:
             return str(st.session_state["api_key"]).strip()
+        if "OPENROUTER_API_KEY" in st.session_state and st.session_state["OPENROUTER_API_KEY"]:
+            return str(st.session_state["OPENROUTER_API_KEY"]).strip()
+    except Exception:
+        pass
+
+    # 2. Check Streamlit secrets
+    try:
+        import streamlit as st
         key = st.secrets.get("OPENROUTER_API_KEY", "")
         if key:
             return str(key).strip()
     except Exception:
         pass
 
-    return os.getenv("OPENROUTER_API_KEY", "").strip()
+    # 3. Check environment variable
+    env_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if env_key:
+        return env_key
+
+    # 4. Check workspace .streamlit/secrets.toml directly (independent of current working directory)
+    try:
+        secrets_file = BASE_DIR / ".streamlit" / "secrets.toml"
+        if secrets_file.exists():
+            content = secrets_file.read_text(encoding="utf-8")
+            import re
+            m = re.search(r'OPENROUTER_API_KEY\s*=\s*["\']([^"\']+)["\']', content)
+            if m and m.group(1).strip():
+                return m.group(1).strip()
+    except Exception:
+        pass
+
+    # 5. Check workspace .env directly
+    try:
+        env_file = BASE_DIR / ".env"
+        if env_file.exists():
+            content = env_file.read_text(encoding="utf-8")
+            import re
+            m = re.search(r'OPENROUTER_API_KEY\s*=\s*["\']?([^"\'\r\n]+)["\']?', content)
+            if m and m.group(1).strip():
+                return m.group(1).strip()
+    except Exception:
+        pass
+
+    # 6. Check user home .streamlit/secrets.toml
+    try:
+        home_secrets = Path.home() / ".streamlit" / "secrets.toml"
+        if home_secrets.exists():
+            content = home_secrets.read_text(encoding="utf-8")
+            import re
+            m = re.search(r'OPENROUTER_API_KEY\s*=\s*["\']([^"\']+)["\']', content)
+            if m and m.group(1).strip():
+                return m.group(1).strip()
+    except Exception:
+        pass
+
+    return ""
 
 
 def ai_is_configured() -> bool:
@@ -585,3 +640,160 @@ Return exactly this JSON shape:
             reasons[item_id] = str(item.get("reason", ""))
 
     return {"selected_ids": selected_ids, "reasons": reasons}
+
+
+# ============================================================
+# AI STRUCTURAL CONCEPT & CAPEX PLANNER
+# ============================================================
+
+def generate_structural_concept(
+    project_title: str,
+    building_type: str,
+    built_up_area_sqft: float,
+    floors: int = 2,
+    soil_type: str = "Medium Hard Murum / Clay",
+    special_requirements: str = "",
+) -> StructuralConcept:
+    """
+    Generate preliminary structural dimensions, material consumption,
+    and capex expenditure based on IS 456:2000 / NBC guidelines and AI insights.
+    """
+    safe_sqft = max(100.0, float(built_up_area_sqft))
+    safe_floors = max(1, int(floors))
+    area_sqm = round(safe_sqft / 10.7639, 2)
+    floors_text = f"Ground + {safe_floors - 1} Floors (Total {safe_floors} storeys)" if safe_floors > 1 else "Ground Floor Structure"
+
+    # IS 456 Preliminary Sizing Rules
+    if safe_floors <= 2:
+        col_size = "230 mm × 380 mm (9\" × 15\") with 4-#16 + 2-#12 TMT bars"
+        beam_size = "230 mm × 380 mm (9\" × 15\") with #16 & #12 longitudinal bars"
+        slab_thick = "125 mm (5\") Two-Way Slab with #8 @ 150mm c/c"
+        grid_spacing = "3.5 m × 4.2 m (11.5 ft × 13.8 ft regular column grid)"
+        foundation = "Isolated Trapezoidal Pad Footing (1.8m × 1.8m × 0.45m depth at -1.5m GL)"
+        concrete_grade = "M-25 (Characteristic strength 25 N/mm²)"
+        steel_grade = "Fe 500D TMT High Ductility Rebar"
+        steel_ratio = 82.0  # kg per m3 of concrete
+        cost_per_sqft = 1750.0
+    elif safe_floors <= 4:
+        col_size = "230 mm × 450 mm (9\" × 18\") with 6-#16 + 2-#20 TMT bars"
+        beam_size = "230 mm × 450 mm (9\" × 18\") with #20 & #16 longitudinal bars"
+        slab_thick = "135 mm (5.3\") Slab with #10 @ 150mm c/c"
+        grid_spacing = "3.8 m × 4.5 m (12.5 ft × 14.8 ft regular column grid)"
+        foundation = "Raft Foundation or Combined Footing with strap beams at -2.0m GL"
+        concrete_grade = "M-25 / M-30"
+        steel_grade = "Fe 500D TMT Rebar"
+        steel_ratio = 92.0
+        cost_per_sqft = 1950.0
+    else:
+        col_size = "300 mm × 600 mm (12\" × 24\") with 8-#20 + 4-#25 TMT bars"
+        beam_size = "300 mm × 500 mm (12\" × 20\") heavy structural frame"
+        slab_thick = "150 mm (6\") Two-Way Slab panel"
+        grid_spacing = "4.2 m × 5.0 m (13.8 ft × 16.4 ft structural grid)"
+        foundation = "Bored Cast-in-Situ Pile Foundation / Thick Raft on firm strata"
+        concrete_grade = "M-30 (Characteristic strength 30 N/mm²)"
+        steel_grade = "Fe 500D / Fe 550D TMT Rebar"
+        steel_ratio = 105.0
+        cost_per_sqft = 2250.0
+
+    # Adjust for soil condition
+    soil_l = soil_type.lower()
+    if "black cotton" in soil_l or "soft" in soil_l:
+        foundation = "Under-reamed Pile Foundation or Deep Raft (to prevent swelling/shrinkage settlement)"
+
+    # Deterministic Material Consumption
+    concrete_m3 = round(area_sqm * 0.039, 2)
+    steel_tonnes = round((concrete_m3 * steel_ratio) / 1000.0, 2)
+    # Cement: ~7.8 bags per m3 concrete + ~1.6 bags per m2 finishing/masonry
+    cement_bags = int(round(concrete_m3 * 7.8 + area_sqm * 1.5))
+    # Sand: ~0.45 m3 per m3 concrete / 2.83 (brass)
+    sand_brass = round((concrete_m3 * 0.45 + area_sqm * 0.04) / 2.83, 1)
+    # Aggregate: ~0.85 m3 per m3 concrete / 2.83
+    agg_brass = round((concrete_m3 * 0.85) / 2.83, 1)
+
+    # Capex Breakdown (Maharashtra PWD benchmark ratios)
+    total_cost = round(safe_sqft * cost_per_sqft, 2)
+    substructure_cost = round(total_cost * 0.14, 2)
+    superstructure_cost = round(total_cost * 0.33, 2)
+    masonry_plaster_cost = round(total_cost * 0.18, 2)
+    finishing_cost = round(total_cost * 0.19, 2)
+    mep_cost = round(total_cost * 0.16, 2)
+
+    # Baseline engineering guidelines
+    guidelines = [
+        f"Concrete grade {concrete_grade} recommended with maximum water-cement ratio 0.45 for durability (IS 456:2000 Cl 8.2).",
+        f"Fe 500D rebar provides superior elongation (>16%) critical for seismic resistance in Zone III/IV.",
+        f"Minimum clear cover: Footings 50mm, Columns 40mm, Beams 25mm, Slabs 20mm.",
+        f"Ensure plinth level is maintained at minimum +600 mm (+2.0 ft) above adjacent natural ground level / road crown.",
+        f"Anti-termite treatment with Chlorpyrifos 20% EC recommended along foundation trenches and plinth backfill.",
+    ]
+    if "black cotton" in soil_l:
+        guidelines.append("Black cotton soil requires CNS (Cohesive Non-Swelling) cushion of 1.0m thickness below footing bed.")
+
+    summary = (
+        f"Preliminary structural scheme for a {building_type} ({floors_text}) with {safe_sqft:,.0f} sq.ft "
+        f"built-up area. Framed RCC system with {col_size.split(' with')[0]} columns and {beam_size.split(' with')[0]} "
+        f"beams. Estimated primary civil capital expenditure: ₹{total_cost / 1e5:.2f} Lakhs (₹{total_cost / 1e7:.2f} Cr)."
+    )
+
+    # If AI API key is configured, query LLM for richer contextual advisories
+    if ai_is_configured():
+        prompt = f"""Act as a Chief Structural Engineer under Maharashtra PWD.
+Provide structural engineering recommendations for:
+Project: {project_title or 'Proposed Civil Structure'}
+Type: {building_type}
+Built-up Area: {safe_sqft} sq.ft ({area_sqm} m²)
+Floors: {floors_text}
+Soil: {soil_type}
+Special Notes: {special_requirements or 'None'}
+
+Return a JSON with:
+{{
+  "engineering_guidelines": ["point 1", "point 2", "point 3", "point 4"],
+  "structural_concept_notes": "2-3 concise sentences on structural layout and load path"
+}}"""
+        try:
+            raw_text = _request_with_fallback(
+                [{"role": "user", "content": prompt}],
+                system_prompt="You are a senior PWD civil structural engineering expert. Output valid JSON only.",
+                temperature=0.2,
+                json_mode=True,
+            )
+            parsed = parse_json_response(raw_text)
+            if isinstance(parsed, dict):
+                ai_points = parsed.get("engineering_guidelines")
+                if isinstance(ai_points, list) and len(ai_points) >= 2:
+                    guidelines = [str(p) for p in ai_points[:6]]
+                ai_notes = parsed.get("structural_concept_notes")
+                if ai_notes and isinstance(ai_notes, str):
+                    summary = f"{summary} {ai_notes.strip()}"
+        except Exception:
+            pass  # Safe fallback to deterministic rules
+
+    return StructuralConcept(
+        project_title=project_title or f"Structural Concept ({building_type})",
+        building_type=building_type,
+        built_up_area_sqft=safe_sqft,
+        built_up_area_sqm=area_sqm,
+        floors_text=floors_text,
+        foundation_concept=foundation,
+        column_grid_spacing=grid_spacing,
+        column_size=col_size,
+        beam_size=beam_size,
+        slab_thickness=slab_thick,
+        concrete_grade=concrete_grade,
+        steel_grade=steel_grade,
+        estimated_concrete_m3=concrete_m3,
+        estimated_steel_tonnes=steel_tonnes,
+        estimated_cement_bags=cement_bags,
+        estimated_sand_brass=sand_brass,
+        estimated_aggregate_brass=agg_brass,
+        cost_substructure=substructure_cost,
+        cost_superstructure_rcc=superstructure_cost,
+        cost_masonry_plaster=masonry_plaster_cost,
+        cost_finishing_flooring_doors=finishing_cost,
+        cost_plumbing_electrical=mep_cost,
+        cost_total_estimated=total_cost,
+        engineering_guidelines=guidelines,
+        raw_idea_summary=summary,
+    )
+
