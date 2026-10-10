@@ -602,15 +602,18 @@ def render_concept_module(df: pd.DataFrame):
         notes = st.text_area("Special Architectural or Structural Requirements", placeholder="e.g. Earthquake zone III, column-free conference hall, basement parking", key="sc_notes")
 
     if st.button("⚡ Synthesize Structural Concept & Capex Breakdown", type="primary", use_container_width=True, key="btn_gen_concept"):
+        # Extract integer floor count from selectbox text like "G+2 (3 Storeys)"
+        import re
+        _fl_match = re.search(r'\((\d+)\s*Storey', floors_t)
+        _floors_int = int(_fl_match.group(1)) if _fl_match else 2
+
         with st.spinner("Executing IS 456 preliminary member sizing algorithms and material takeoffs..."):
             concept = generate_structural_concept(
                 project_title=title,
                 building_type=b_type,
                 built_up_area_sqft=sqft,
-                floors_text=floors_t,
+                floors=_floors_int,
                 soil_type=soil,
-                concrete_grade=conc,
-                steel_grade=steel,
                 special_requirements=notes,
             )
             st.session_state.s_concept = concept
