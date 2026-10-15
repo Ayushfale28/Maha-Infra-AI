@@ -20,6 +20,8 @@ Improvements over the earlier version:
 
 from __future__ import annotations
 
+from typing import Any
+
 from schemas import (
     ProjectMeasurements,
     BuildingMeasurements,
